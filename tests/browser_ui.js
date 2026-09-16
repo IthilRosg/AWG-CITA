@@ -37,6 +37,10 @@ const waitForFixture = async () => {
         await page.locator('#language-toggle').click();
         await page.getByRole('button', { name: 'English' }).click();
         if ((await page.locator('#refresh').textContent()).trim() !== 'Refresh') throw new Error('English locale did not render');
+        await page.route('**/api/status', route => route.abort());
+        await page.locator('#refresh').click();
+        await page.waitForFunction(() => document.querySelector('#state')?.textContent === 'ERROR');
+        if ((await page.locator('#connection').textContent()).trim() !== '● ERROR') throw new Error('refresh failure did not render deterministic error state');
       }
     }
     console.log('playwright_sector_console=PASS');

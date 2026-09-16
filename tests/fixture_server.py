@@ -1,5 +1,10 @@
 """Synthetic loopback server for browser tests; never use for deployment."""
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from awg_cita.app import AwgReader, create_server
 
 INTERFACE = ["fixture-private", "fixture-public", "51820"] + ["0"] * 26

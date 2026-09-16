@@ -5,22 +5,47 @@ from __future__ import annotations
 import datetime as dt
 import ipaddress
 import json
+import queue
 import re
 import socket
 import subprocess
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Callable
 from urllib.parse import urlsplit
 
 from .snapshot import AwgDumpError, build_snapshot
 from .ui import INDEX_HTML
 
+_STATIC_DIR = Path(__file__).with_name("static")
+_STATIC_ASSETS = {
+    "/static/sector-console.css": ("text/css; charset=utf-8", _STATIC_DIR.joinpath("sector-console.css").read_bytes()),
+    "/static/sector-console.js": ("application/javascript; charset=utf-8", _STATIC_DIR.joinpath("sector-console.js").read_bytes()),
+}
+
 _INTERFACE_RE = re.compile(r"^[A-Za-z0-9_.-]{1,15}$")
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1"})
 _DEFAULT_ALLOWED_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 _BRACKETED_HOST_RE = re.compile(r"^\[([0-9A-Fa-f:.]+)\](?::([0-9]{1,5}))?$")
 _PLAIN_HOST_RE = re.compile(r"^([A-Za-z0-9.-]+)(?::([0-9]{1,5}))?$")
+_DNS_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+MAX_AWG_DUMP_BYTES = 1_048_576
+
+
+class AwgOutputTooLarge(RuntimeError):
+    """Raised when AWG stdout exceeds the fixed in-memory safety bound."""
+
+
+def _valid_allowed_host(value: str) -> bool:
+    if not isinstance(value, str) or not value or value != value.lower():
+        return False
+    try:
+        return str(ipaddress.ip_address(value)) == value
+    except ValueError:
+        labels = value.split(".")
+        return len(value) <= 253 and all(_DNS_LABEL_RE.fullmatch(label) for label in labels)
 
 
 class AwgReader:
@@ -38,15 +63,53 @@ class AwgReader:
 
     @staticmethod
     def _run(argv: tuple[str, ...], timeout: int) -> tuple[str, str]:
-        completed = subprocess.run(list(argv), check=False, capture_output=True, text=True, timeout=timeout, env={"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "LC_ALL": "C"})
-        if completed.returncode != 0:
+        process = subprocess.Popen(list(argv), stdout=subprocess.PIPE, stderr=subprocess.PIPE, env={"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "LC_ALL": "C"})
+        results: queue.Queue[tuple[str, bytes]] = queue.Queue()
+
+        def drain(name: str, stream: object) -> None:
+            try:
+                results.put((name, stream.read(MAX_AWG_DUMP_BYTES + 1)))
+            finally:
+                stream.close()
+
+        streams = (("stdout", process.stdout), ("stderr", process.stderr))
+        threads = [threading.Thread(target=drain, args=(name, stream), daemon=True) for name, stream in streams]
+        for thread in threads:
+            thread.start()
+        output: dict[str, bytes] = {}
+        deadline = time.monotonic() + timeout
+        killed = False
+        timed_out = False
+        while len(output) < 2:
+            try:
+                wait = 1 if killed else max(0, deadline - time.monotonic())
+                name, data = results.get(timeout=wait)
+            except queue.Empty:
+                process.kill()
+                killed = True
+                timed_out = True
+                continue
+            output[name] = data
+            if name == "stdout" and len(data) > MAX_AWG_DUMP_BYTES and not killed:
+                process.kill()
+                killed = True
+        for thread in threads:
+            thread.join()
+        returncode = process.wait()
+        if timed_out:
+            raise subprocess.TimeoutExpired(argv, timeout)
+        if len(output["stdout"]) > MAX_AWG_DUMP_BYTES:
+            raise AwgOutputTooLarge("AWG stdout exceeds safety limit")
+        if returncode != 0:
             raise RuntimeError("awg command failed")
-        return completed.stdout, completed.stderr
+        return output["stdout"].decode("utf-8"), output["stderr"].decode("utf-8", errors="replace")
 
     def snapshot(self) -> dict[str, object]:
         checked_at = dt.datetime.now(dt.timezone.utc).isoformat()
         try:
             raw, _stderr = self.runner((self.binary, "show", self.interface, "dump"), 5)
+            if len(raw.encode("utf-8")) > MAX_AWG_DUMP_BYTES:
+                return {"schema_version": 1, "state": "ERROR", "error_code": "awg_output_too_large", "interface": self.interface, "checked_at": checked_at}
             snapshot = build_snapshot(raw, now=int(self.clock()), interface=self.interface)
             snapshot.update({"state": "OK", "checked_at": checked_at})
             return snapshot
@@ -71,7 +134,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
         if allow:
             self.send_header("Allow", allow)
         self.end_headers()
@@ -83,7 +146,10 @@ class _Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def _host_allowed(self) -> bool:
-        value = self.headers.get("Host", "").strip().lower()
+        values = self.headers.get_all("Host")
+        if values is None or len(values) != 1:
+            return False
+        value = values[0].strip().lower()
         match = _BRACKETED_HOST_RE.fullmatch(value) if value.startswith("[") else _PLAIN_HOST_RE.fullmatch(value)
         if not match:
             return False
@@ -106,6 +172,16 @@ class _Handler(BaseHTTPRequestHandler):
     def _empty(self, status: int, allow: str | None = None) -> None:
         self._headers(status, "text/plain; charset=utf-8", 0, allow=allow)
 
+    def _asset(self, path: str, include_body: bool = True) -> bool:
+        asset = _STATIC_ASSETS.get(path)
+        if asset is None:
+            return False
+        content_type, body = asset
+        self._headers(200, content_type, len(body))
+        if include_body:
+            self.wfile.write(body)
+        return True
+
     def do_GET(self) -> None:
         if self._reject_untrusted_host():
             return
@@ -114,6 +190,8 @@ class _Handler(BaseHTTPRequestHandler):
             body = INDEX_HTML.encode()
             self._headers(200, "text/html; charset=utf-8", len(body))
             self.wfile.write(body)
+            return
+        if self._asset(path):
             return
         if path != "/api/status":
             self._json(404, {"error_code": "not_found"})
@@ -128,6 +206,8 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/":
             body = INDEX_HTML.encode()
             self._headers(200, "text/html; charset=utf-8", len(body))
+        elif self._asset(path, include_body=False):
+            return
         elif path == "/api/status":
             data = self.reader.snapshot()
             self._json(200 if data.get("state") == "OK" else 503, data, include_body=False)
@@ -153,6 +233,8 @@ class _Handler(BaseHTTPRequestHandler):
 def create_server(reader: AwgReader, host: str = "127.0.0.1", port: int = 8788, allowed_hosts: frozenset[str] | None = None) -> ThreadingHTTPServer:
     if host not in _LOOPBACK_HOSTS:
         raise ValueError("AWG CITA must bind to a loopback address")
+    if allowed_hosts is not None and not all(_valid_allowed_host(value) for value in allowed_hosts):
+        raise ValueError("allowed_hosts must contain canonical hostnames or IP addresses")
 
     class Handler(_Handler):
         pass

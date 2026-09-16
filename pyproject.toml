@@ -19,3 +19,6 @@ classifiers = [
 
 [tool.setuptools]
 packages = ["awg_cita"]
+
+[tool.setuptools.package-data]
+awg_cita = ["static/*.css", "static/*.js"]

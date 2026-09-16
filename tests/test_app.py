@@ -1,8 +1,10 @@
 import threading
 import unittest
 from http.client import HTTPConnection
+import socket
+import sys
 
-from awg_cita.app import AwgReader, create_server
+from awg_cita.app import MAX_AWG_DUMP_BYTES, AwgOutputTooLarge, AwgReader, create_server
 
 
 INTERFACE = ["fixture-private", "fixture-public", "51820"] + ["0"] * 26
@@ -11,6 +13,29 @@ DUMP = "\n".join(("\t".join(INTERFACE), "\t".join(PEER)))
 
 
 class ApiTests(unittest.TestCase):
+    def test_default_runner_terminates_child_after_output_limit(self):
+        argv = (sys.executable, "-c", "import sys,time; sys.stdout.buffer.write(b'x' * 1048577); sys.stdout.flush(); time.sleep(10)")
+        with self.assertRaises(AwgOutputTooLarge):
+            AwgReader._run(argv, 3)
+
+    def test_default_runner_allows_output_at_limit(self):
+        argv = (sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x' * 1048576)")
+        stdout, _stderr = AwgReader._run(argv, 3)
+        self.assertEqual(len(stdout.encode("utf-8")), MAX_AWG_DUMP_BYTES)
+
+    def test_oversized_awg_output_fails_closed(self):
+        reader = AwgReader(binary="/usr/local/bin/awg", interface="awg0", runner=lambda _argv, _timeout: ("x" * 1_048_577, ""), clock=lambda: 1700000030)
+        snapshot = reader.snapshot()
+        self.assertEqual(snapshot["state"], "ERROR")
+        self.assertEqual(snapshot["error_code"], "awg_output_too_large")
+
+    def test_explicit_allowed_hosts_must_be_canonical_hostnames_or_loopback_ips(self):
+        reader = AwgReader(binary="/usr/local/bin/awg", interface="awg0", runner=lambda _argv, _timeout: (DUMP, ""), clock=lambda: 1700000030)
+        for hosts in (frozenset({"panel.example:8444"}), frozenset({"bad host"}), frozenset({"Panel.Example"}), frozenset({"[::1]"})):
+            with self.subTest(hosts=hosts):
+                with self.assertRaises(ValueError):
+                    create_server(reader, "127.0.0.1", 0, allowed_hosts=hosts)
+
     def test_loopback_api_is_safe_and_read_only(self):
         reader = AwgReader(binary="/usr/local/bin/awg", interface="awg0", runner=lambda _argv, _timeout: (DUMP, ""), clock=lambda: 1700000030)
         server = create_server(reader, "127.0.0.1", 0)
@@ -23,10 +48,23 @@ class ApiTests(unittest.TestCase):
             body = response.read().decode()
             self.assertEqual(response.status, 200)
             self.assertEqual(response.getheader("X-Frame-Options"), "DENY")
+            self.assertEqual(response.getheader("Content-Security-Policy"), "default-src 'self'; script-src 'self'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
             self.assertIn('"interface":"awg0"', body)
             self.assertNotIn("fixture-private", body)
             self.assertNotIn("fixture-public", body)
             self.assertNotIn("fixture-peer", body)
+
+            connection.request("GET", "/static/sector-console.css")
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.getheader("Content-Type"), "text/css; charset=utf-8")
+            self.assertIn("--bg", response.read().decode())
+
+            connection.request("GET", "/static/sector-console.js")
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.getheader("Content-Type"), "application/javascript; charset=utf-8")
+            self.assertIn("async function refresh", response.read().decode())
 
             connection.request("GET", "/api/status", headers={"Host": "untrusted.example"})
             response = connection.getresponse()
@@ -105,6 +143,22 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
             self.assertIn('"interface":"awg0"', response.read().decode())
             connection.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=3)
+
+
+    def test_duplicate_host_headers_are_rejected(self):
+        reader = AwgReader(binary="/usr/local/bin/awg", interface="awg0", runner=lambda _argv, _timeout: (DUMP, ""), clock=lambda: 1700000030)
+        server = create_server(reader, "127.0.0.1", 0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with socket.create_connection(("127.0.0.1", server.server_address[1]), timeout=3) as connection:
+                connection.sendall(b"GET /api/status HTTP/1.1\r\nHost: 127.0.0.1\r\nHost: attacker.example\r\nConnection: close\r\n\r\n")
+                response = connection.recv(4096)
+            self.assertIn(b" 421 ", response)
         finally:
             server.shutdown()
             server.server_close()
