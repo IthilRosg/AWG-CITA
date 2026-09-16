@@ -3,8 +3,9 @@ import unittest
 from http.client import HTTPConnection
 import socket
 import sys
+import time
 
-from awg_cita.app import MAX_AWG_DUMP_BYTES, AwgOutputTooLarge, AwgReader, create_server
+from awg_cita.app import AwgCommandOutputError, MAX_AWG_DUMP_BYTES, AwgOutputTooLarge, AwgReader, create_server
 
 
 INTERFACE = ["fixture-private", "fixture-public", "51820"] + ["0"] * 26
@@ -13,6 +14,18 @@ DUMP = "\n".join(("\t".join(INTERFACE), "\t".join(PEER)))
 
 
 class ApiTests(unittest.TestCase):
+    def test_default_runner_does_not_wait_for_descendant_pipe_handles(self):
+        argv = (sys.executable, "-c", "import subprocess,sys,time; subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(10)']); sys.stdout.buffer.write(b'x' * 1048577); sys.stdout.flush()")
+        started = time.monotonic()
+        with self.assertRaises(AwgOutputTooLarge):
+            AwgReader._run(argv, 3)
+        self.assertLess(time.monotonic() - started, 4)
+
+    def test_default_runner_rejects_invalid_utf8_stdout(self):
+        argv = (sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'\\xff')")
+        with self.assertRaises(AwgCommandOutputError):
+            AwgReader._run(argv, 3)
+
     def test_default_runner_terminates_child_after_output_limit(self):
         argv = (sys.executable, "-c", "import sys,time; sys.stdout.buffer.write(b'x' * 1048577); sys.stdout.flush(); time.sleep(10)")
         with self.assertRaises(AwgOutputTooLarge):
@@ -31,7 +44,8 @@ class ApiTests(unittest.TestCase):
 
     def test_explicit_allowed_hosts_must_be_canonical_hostnames_or_loopback_ips(self):
         reader = AwgReader(binary="/usr/local/bin/awg", interface="awg0", runner=lambda _argv, _timeout: (DUMP, ""), clock=lambda: 1700000030)
-        for hosts in (frozenset({"panel.example:8444"}), frozenset({"bad host"}), frozenset({"Panel.Example"}), frozenset({"[::1]"})):
+        ambiguous_numeric_name = "127" + ".0.0.01"
+        for hosts in (frozenset({"panel.example:8444"}), frozenset({"bad host"}), frozenset({"Panel.Example"}), frozenset({"[::1]"}), frozenset({ambiguous_numeric_name})):
             with self.subTest(hosts=hosts):
                 with self.assertRaises(ValueError):
                     create_server(reader, "127.0.0.1", 0, allowed_hosts=hosts)

@@ -5,8 +5,10 @@ from __future__ import annotations
 import datetime as dt
 import ipaddress
 import json
+import os
 import queue
 import re
+import signal
 import socket
 import subprocess
 import threading
@@ -32,10 +34,15 @@ _BRACKETED_HOST_RE = re.compile(r"^\[([0-9A-Fa-f:.]+)\](?::([0-9]{1,5}))?$")
 _PLAIN_HOST_RE = re.compile(r"^([A-Za-z0-9.-]+)(?::([0-9]{1,5}))?$")
 _DNS_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 MAX_AWG_DUMP_BYTES = 1_048_576
+TERMINATION_DRAIN_SECONDS = 1
 
 
 class AwgOutputTooLarge(RuntimeError):
     """Raised when AWG stdout exceeds the fixed in-memory safety bound."""
+
+
+class AwgCommandOutputError(RuntimeError):
+    """Raised when AWG stdout is not valid UTF-8 telemetry text."""
 
 
 def _valid_allowed_host(value: str) -> bool:
@@ -45,7 +52,7 @@ def _valid_allowed_host(value: str) -> bool:
         return str(ipaddress.ip_address(value)) == value
     except ValueError:
         labels = value.split(".")
-        return len(value) <= 253 and all(_DNS_LABEL_RE.fullmatch(label) for label in labels)
+        return len(value) <= 253 and not all(label.isdigit() for label in labels) and all(_DNS_LABEL_RE.fullmatch(label) for label in labels)
 
 
 class AwgReader:
@@ -63,7 +70,7 @@ class AwgReader:
 
     @staticmethod
     def _run(argv: tuple[str, ...], timeout: int) -> tuple[str, str]:
-        process = subprocess.Popen(list(argv), stdout=subprocess.PIPE, stderr=subprocess.PIPE, env={"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "LC_ALL": "C"})
+        process = subprocess.Popen(list(argv), stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=os.name == "posix", env={"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "LC_ALL": "C"})
         results: queue.Queue[tuple[str, bytes]] = queue.Queue()
 
         def drain(name: str, stream: object) -> None:
@@ -80,29 +87,55 @@ class AwgReader:
         deadline = time.monotonic() + timeout
         killed = False
         timed_out = False
+        termination_deadline: float | None = None
+
+        def terminate() -> None:
+            nonlocal killed, termination_deadline
+            if killed:
+                return
+            if os.name == "posix":
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except (OSError, ProcessLookupError):
+                    pass
+                else:
+                    killed = True
+                    termination_deadline = time.monotonic() + TERMINATION_DRAIN_SECONDS
+                    return
+            process.kill()
+            killed = True
+            termination_deadline = time.monotonic() + TERMINATION_DRAIN_SECONDS
+
         while len(output) < 2:
             try:
-                wait = 1 if killed else max(0, deadline - time.monotonic())
+                wait = max(0, (termination_deadline if killed else deadline) - time.monotonic())
                 name, data = results.get(timeout=wait)
             except queue.Empty:
-                process.kill()
-                killed = True
+                if killed:
+                    break
+                terminate()
                 timed_out = True
                 continue
             output[name] = data
             if name == "stdout" and len(data) > MAX_AWG_DUMP_BYTES and not killed:
-                process.kill()
-                killed = True
-        for thread in threads:
-            thread.join()
-        returncode = process.wait()
+                terminate()
+        if not killed:
+            for thread in threads:
+                thread.join()
+        returncode = process.wait(timeout=TERMINATION_DRAIN_SECONDS) if killed else process.wait()
+        if len(output.get("stdout", b"")) > MAX_AWG_DUMP_BYTES:
+            raise AwgOutputTooLarge("AWG stdout exceeds safety limit")
         if timed_out:
             raise subprocess.TimeoutExpired(argv, timeout)
-        if len(output["stdout"]) > MAX_AWG_DUMP_BYTES:
-            raise AwgOutputTooLarge("AWG stdout exceeds safety limit")
         if returncode != 0:
             raise RuntimeError("awg command failed")
-        return output["stdout"].decode("utf-8"), output["stderr"].decode("utf-8", errors="replace")
+        if len(output) != 2:
+            raise RuntimeError("AWG output streams did not close after termination")
+        try:
+            stdout = output["stdout"].decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise AwgCommandOutputError("AWG stdout is not valid UTF-8") from error
+        return stdout, output["stderr"].decode("utf-8", errors="replace")
 
     def snapshot(self) -> dict[str, object]:
         checked_at = dt.datetime.now(dt.timezone.utc).isoformat()
