@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "awg-cita"
+version = "0.1.0a0"
+description = "Security-first, read-only operator console primitives for AmneziaWG"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: System :: Networking",
+]
+
+[tool.setuptools]
+packages = ["awg_cita"]
