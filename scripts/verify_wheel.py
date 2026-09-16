@@ -16,6 +16,10 @@ def python_in(environment: Path) -> Path:
     return environment / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
 
 
+def console_in(environment: Path) -> Path:
+    return environment / ("Scripts/awg-cita.exe" if sys.platform == "win32" else "bin/awg-cita")
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="awg-cita-wheel-") as temporary:
         work = Path(temporary)
@@ -32,6 +36,7 @@ def main() -> int:
         interpreter = python_in(environment)
         subprocess.run([str(interpreter), "-m", "pip", "install", "--no-index", "--find-links", str(dist), "awg-cita"], check=True)
         subprocess.run([str(interpreter), "-c", "import awg_cita.app"], check=True)
+        subprocess.run([str(console_in(environment)), "--help"], check=True, stdout=subprocess.DEVNULL)
     print("wheel_package_data=PASS")
     return 0
 

@@ -43,6 +43,12 @@ single-protocol, least-privilege operational scope.
 Before the first release: run secret scanning, provide synthetic fixtures and
 reproducible tests, and remove all infrastructure-specific deployment data.
 
+## Self-hosting
+
+The package ships an `awg-cita` loopback-only launcher. See the generic
+[self-hosted deployment guide](docs/SELF_HOSTED.md) for its least-privilege
+boundary, reverse-proxy responsibilities, preflight and rollback checks.
+
 ## License
 
 This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE).

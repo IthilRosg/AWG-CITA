@@ -17,6 +17,9 @@ classifiers = [
   "Topic :: System :: Networking",
 ]
 
+[project.scripts]
+awg-cita = "awg_cita.cli:main"
+
 [tool.setuptools]
 packages = ["awg_cita"]
 
