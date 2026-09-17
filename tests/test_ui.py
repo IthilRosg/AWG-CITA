@@ -39,6 +39,11 @@ class UiTests(unittest.TestCase):
         self.assertIn("state:'ERROR'", script)
         self.assertNotIn("method: 'POST'", script)
 
+    def test_sector_console_script_is_scoped_from_extension_globals(self):
+        script = UI_JS.read_text(encoding="utf-8").strip()
+        self.assertTrue(script.startswith("(()=>{"))
+        self.assertTrue(script.endswith("})();"))
+
 
 if __name__ == "__main__":
     unittest.main()
