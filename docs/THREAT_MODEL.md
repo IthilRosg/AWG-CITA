@@ -16,9 +16,13 @@
 
 ## V0 guarantees
 
-- `GET /api/status` is the sole telemetry API surface; `GET /` serves its UI.
-- `HEAD` mirrors each GET route and `OPTIONS /api/status` documents the
-  read-only method set. Mutation methods are refused.
+- `GET /api/status` serves the current safe telemetry; `GET /api/history`
+  serves a bounded in-process history of aggregate-safe results only; `GET /`
+  serves the UI.
+- History is cleared on process restart and excludes peers, keys, endpoints, raw
+  dumps, addresses, configurations and arbitrary command output.
+- `HEAD` mirrors each GET route and `OPTIONS` documents the read-only method
+  set. Mutation methods are refused.
 - Host headers are parsed strictly and must match loopback defaults or an
   explicit reverse-proxy `allowed_hosts` entry.
 - The strict parser accepts the documented AWG layout only and discards sensitive

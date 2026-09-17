@@ -56,8 +56,12 @@ This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
 ## V0 HTTP contract
 
 - `GET /` serves the operator UI; `GET /api/status` serves the safe telemetry.
-- `HEAD` mirrors those two `GET` routes without a body; `OPTIONS /api/status`
-  advertises those read-only methods.
+- `GET /api/history` serves a bounded, in-process projection of prior safe-status
+  results. It retains aggregate metrics or generic error codes only and is cleared
+  when the process stops; it never retains peers, keys, endpoints, raw dumps or
+  configuration data.
+- `HEAD` mirrors these `GET` routes without a body; `OPTIONS /api/status` and
+  `OPTIONS /api/history` advertise the read-only methods.
 - `POST`, `PUT`, `PATCH` and `DELETE` return `405`; other paths return `404`.
 - The server binds only to loopback. A reverse proxy must provide HTTPS and
   authentication, preserve a hostname explicitly listed in `allowed_hosts`, and

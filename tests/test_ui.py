@@ -19,6 +19,8 @@ class UiTests(unittest.TestCase):
             'data-lang="fr"',
             'id="peers"',
             'id="inspect-total"',
+            'id="history"',
+            'data-i18n="history"',
             'data-i18n="totalTraffic"',
             'data-runtime="read_only"',
             '<link rel="stylesheet" href="/static/sector-console.css">',
@@ -32,6 +34,7 @@ class UiTests(unittest.TestCase):
         self.assertNotIn("SE" + "-1", INDEX_HTML)
         script = UI_JS.read_text(encoding="utf-8")
         self.assertIn("fetch('/api/status'", script)
+        self.assertIn("fetch('/api/history'", script)
         self.assertIn("state:'ERROR'", script)
         self.assertNotIn("method: 'POST'", script)
 

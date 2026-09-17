@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlsplit
 
+from .history import SnapshotHistory
 from .snapshot import AwgDumpError, build_snapshot
 from .ui import INDEX_HTML
 
@@ -155,6 +156,7 @@ class AwgReader:
 class _Handler(BaseHTTPRequestHandler):
     reader: AwgReader
     allowed_hosts: frozenset[str]
+    history: SnapshotHistory
 
     def log_message(self, _format: str, *_args: object) -> None:
         return
@@ -226,10 +228,14 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if self._asset(path):
             return
+        if path == "/api/history":
+            self._json(200, {"schema_version": 1, "history": self.history.records()})
+            return
         if path != "/api/status":
             self._json(404, {"error_code": "not_found"})
             return
         data = self.reader.snapshot()
+        self.history.record(data)
         self._json(200 if data.get("state") == "OK" else 503, data)
 
     def do_HEAD(self) -> None:
@@ -241,6 +247,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._headers(200, "text/html; charset=utf-8", len(body))
         elif self._asset(path, include_body=False):
             return
+        elif path == "/api/history":
+            self._json(200, {"schema_version": 1, "history": self.history.records()}, include_body=False)
         elif path == "/api/status":
             data = self.reader.snapshot()
             self._json(200 if data.get("state") == "OK" else 503, data, include_body=False)
@@ -250,7 +258,7 @@ class _Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self) -> None:
         if self._reject_untrusted_host():
             return
-        if urlsplit(self.path).path == "/api/status":
+        if urlsplit(self.path).path in {"/api/status", "/api/history"}:
             self._empty(204, allow="GET, HEAD, OPTIONS")
         else:
             self._json(404, {"error_code": "not_found"})
@@ -274,6 +282,7 @@ def create_server(reader: AwgReader, host: str = "127.0.0.1", port: int = 8788, 
 
     Handler.reader = reader
     Handler.allowed_hosts = _DEFAULT_ALLOWED_HOSTS if allowed_hosts is None else allowed_hosts
+    Handler.history = SnapshotHistory()
     if host == "::1":
         class IPv6ThreadingHTTPServer(ThreadingHTTPServer):
             address_family = socket.AF_INET6
