@@ -151,6 +151,31 @@ class ApiTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=3)
 
+    def test_history_rejects_untrusted_host_and_records_generic_error_only(self):
+        reader = AwgReader(binary="/usr/local/bin/awg", interface="awg0", runner=lambda _argv, _timeout: (_ for _ in ()).throw(RuntimeError("fixture command output must not escape")))
+        server = create_server(reader, "127.0.0.1", 0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            connection = HTTPConnection("127.0.0.1", server.server_address[1], timeout=3)
+            connection.request("GET", "/api/history", headers={"Host": "untrusted.example"})
+            self.assertEqual(connection.getresponse().status, 421)
+            connection.request("GET", "/api/status")
+            self.assertEqual(connection.getresponse().status, 503)
+            connection.request("GET", "/api/history")
+            response = connection.getresponse()
+            body = response.read().decode()
+            self.assertEqual(response.status, 200)
+            self.assertIn('"error_code":"awg_command_failed"', body)
+            self.assertNotIn("fixture command output", body)
+            self.assertNotIn('"peers"', body)
+            self.assertNotIn('"summary"', body)
+            connection.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=3)
+
 
     def test_explicit_empty_host_allowlist_denies_all_requests(self):
         reader = AwgReader(binary="/usr/local/bin/awg", interface="awg0", runner=lambda _argv, _timeout: (DUMP, ""), clock=lambda: 1700000030)

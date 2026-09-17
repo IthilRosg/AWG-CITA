@@ -35,6 +35,7 @@ class UiTests(unittest.TestCase):
         script = UI_JS.read_text(encoding="utf-8")
         self.assertIn("fetch('/api/status'", script)
         self.assertIn("fetch('/api/history'", script)
+        self.assertIn("el('history').textContent", script)
         self.assertIn("state:'ERROR'", script)
         self.assertNotIn("method: 'POST'", script)
 

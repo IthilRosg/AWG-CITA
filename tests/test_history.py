@@ -4,6 +4,20 @@ from awg_cita.history import SnapshotHistory
 
 
 class SnapshotHistoryTests(unittest.TestCase):
+    def test_default_limit_evicts_oldest_entry_after_sixty_records(self):
+        history = SnapshotHistory()
+        for index in range(61):
+            history.record({
+                "checked_at": f"2026-09-17T00:{index:02d}:00+00:00",
+                "state": "ERROR",
+                "error_code": "awg_command_failed",
+            })
+
+        records = history.records()
+        self.assertEqual(len(records), 60)
+        self.assertEqual(records[0]["checked_at"], "2026-09-17T00:01:00+00:00")
+        self.assertEqual(records[-1]["checked_at"], "2026-09-17T00:60:00+00:00")
+
     def test_records_a_bounded_safe_projection_of_snapshots(self):
         history = SnapshotHistory(limit=2)
         history.record({

@@ -4,11 +4,11 @@ A security-first, self-hosted operator console for **AmneziaWG**.
 
 ## Status
 
-Pre-release repository preparation. The first public milestone is a read-only
-console: interface state, safe peer metadata, traffic counters, a client
-dossier and a localized operator UI. Peer mutations, configuration exports and
-QR generation are intentionally out of scope until their threat model, audit
-trail and rollback controls are implemented.
+Public pre-alpha. The read-only milestone provides interface state, safe peer
+metadata, traffic counters, a client dossier, bounded in-memory status history
+and a localized operator UI. Peer mutations, configuration exports and QR
+generation are intentionally out of scope until their threat model, audit trail
+and rollback controls are implemented.
 
 ## Product boundary
 
