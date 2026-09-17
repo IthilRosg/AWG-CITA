@@ -58,6 +58,12 @@ class CliTests(unittest.TestCase):
             self.assertEqual(cli.main(["--binary", "/usr/local/bin/awg", "--interface", "awg0"]), 0)
         self.assertIsNone(captured["allowed_hosts"])
 
+    def test_main_refuses_audit_interval_without_an_audit_log(self):
+        with patch("awg_cita.cli.create_server", side_effect=AssertionError("must not start server")):
+            with self.assertRaises(SystemExit) as raised:
+                cli.main(["--binary", "/usr/local/bin/awg", "--interface", "awg0", "--audit-min-interval", "60"])
+        self.assertEqual(raised.exception.code, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

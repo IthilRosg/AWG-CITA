@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlsplit
 
+from .audit import AuditLog
 from .history import SnapshotHistory
 from .snapshot import AwgDumpError, build_snapshot
 from .ui import INDEX_HTML
@@ -157,6 +158,7 @@ class _Handler(BaseHTTPRequestHandler):
     reader: AwgReader
     allowed_hosts: frozenset[str]
     history: SnapshotHistory
+    audit_log: AuditLog | None
 
     def log_message(self, _format: str, *_args: object) -> None:
         return
@@ -234,7 +236,19 @@ class _Handler(BaseHTTPRequestHandler):
         if path != "/api/status":
             self._json(404, {"error_code": "not_found"})
             return
+        if self.audit_log is not None:
+            try:
+                self.audit_log.preflight()
+            except Exception:
+                self._json(503, {"schema_version": 1, "state": "ERROR", "error_code": "audit_write_failed", "checked_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()})
+                return
         data = self.reader.snapshot()
+        if self.audit_log is not None:
+            try:
+                self.audit_log.record(data)
+            except Exception:
+                self._json(503, {"schema_version": 1, "state": "ERROR", "error_code": "audit_write_failed", "checked_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()})
+                return
         self.history.record(data)
         self._json(200 if data.get("state") == "OK" else 503, data)
 
@@ -271,7 +285,7 @@ class _Handler(BaseHTTPRequestHandler):
     do_POST = do_PUT = do_PATCH = do_DELETE = _method_not_allowed
 
 
-def create_server(reader: AwgReader, host: str = "127.0.0.1", port: int = 8788, allowed_hosts: frozenset[str] | None = None) -> ThreadingHTTPServer:
+def create_server(reader: AwgReader, host: str = "127.0.0.1", port: int = 8788, allowed_hosts: frozenset[str] | None = None, audit_log: AuditLog | None = None) -> ThreadingHTTPServer:
     if host not in _LOOPBACK_HOSTS:
         raise ValueError("AWG CITA must bind to a loopback address")
     if allowed_hosts is not None and not all(_valid_allowed_host(value) for value in allowed_hosts):
@@ -283,6 +297,7 @@ def create_server(reader: AwgReader, host: str = "127.0.0.1", port: int = 8788, 
     Handler.reader = reader
     Handler.allowed_hosts = _DEFAULT_ALLOWED_HOSTS if allowed_hosts is None else allowed_hosts
     Handler.history = SnapshotHistory()
+    Handler.audit_log = audit_log
     if host == "::1":
         class IPv6ThreadingHTTPServer(ThreadingHTTPServer):
             address_family = socket.AF_INET6

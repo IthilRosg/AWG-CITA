@@ -2,8 +2,9 @@
 
 ## Status
 
-Design only. This document defines the bounded public V0.3 candidate. It does
-not enable persistence, alter a deployed host, or add an HTTP endpoint.
+Implemented V0.3 candidate. Persistence remains disabled by default; the
+feature is enabled only by an explicit local CLI option. This document does not
+authorize a deployed-host change or add an HTTP endpoint.
 
 ## Goal and boundary
 
@@ -13,7 +14,7 @@ not peer administration, configuration recovery, billing, activity monitoring,
 or a tamper-proof ledger.
 
 The current service is read-only with respect to AWG and peer configuration. In
-future audit mode, an accepted `GET /api/status` can have the deliberate local
+opt-in audit mode, an accepted `GET /api/status` can have the deliberate local
 side effect of appending safe evidence. It remains read-only with respect to
 AWG, peers, proxy configuration, and browser-visible data. `HEAD /api/status`
 does not write evidence even though it performs a telemetry read.
@@ -54,8 +55,9 @@ An `OK` event has exactly `peer_count` and `summary` in addition to those keys.
 An `ERROR` event has exactly `error_code` in addition to the common keys.
 `error_code` is one of `awg_output_too_large`, `invalid_awg_dump`, or
 `awg_command_failed`. It is never an exception message. These exact rules are
-the validation boundary; missing, extra, incorrectly typed, out-of-range, or
-inconsistent values are an audit failure.
+the emitted-event validation boundary; missing, incorrectly typed, out-of-range,
+or inconsistent allowlisted values are an audit failure. Extra source fields
+are deliberately ignored and never serialized.
 
 The resulting record shapes are:
 
@@ -73,10 +75,11 @@ injected extra mappings.
 
 ## Enablement and availability
 
-Persistence is disabled by default. A future CLI may accept `--audit-log PATH`
-and `--audit-min-interval SECONDS`; the interval is a non-boolean integer from
-60 through 3600. Audit mode is valid only on POSIX hosts. Requesting audit mode
-on any other platform is a startup error, not a weaker cross-platform fallback.
+Persistence is disabled by default. The CLI accepts `--audit-log PATH` and the
+optional `--audit-min-interval SECONDS`; the interval is a non-boolean integer
+from 60 through 3600 and is rejected unless audit mode is selected. Audit mode
+is valid only on POSIX hosts. Requesting audit mode on any other platform is a
+startup error, not a weaker cross-platform fallback.
 `PATH` is absolute. The parent directory must already exist; the service never
 creates directories, changes ownership or permissions, or follows an
 operator-supplied symlink.
@@ -148,22 +151,27 @@ responds with HTTP `503` and exactly:
 ```
 
 No underlying error text appears in the HTTP response, history, evidence, or
-standard request log. An audit failure creates no evidence event.
+standard request log. A failure before a complete append creates no evidence
+event. If a complete append succeeds but `fsync` reports failure, the safe event
+may already exist; the response still fails closed, browser history remains
+unchanged, and the writer latches until controlled recovery.
 
 ## Capacity and concurrency
 
 The cap is exactly 1 MiB (`1_048_576` encoded bytes), including trailing
-newlines. Under one process-local lock, the writer checks `fstat` on its
-retained descriptor, validates/encodes one complete record, confirms that
+newlines. Under one process-local lock, the writer validates retained-descriptor
+and parent-leaf identity, validates/encodes one complete record, confirms that
 `current_size + encoded_record_length <= cap`, appends, verifies the full byte
-count, then flushes. It never truncates, rewrites, compresses, rotates, or
-deletes evidence automatically. Requests waiting on the lock observe the
-latched failure state before writing.
+count, flushes, then revalidates exact final size and identity before reporting
+success. It never truncates, rewrites, compresses, rotates, or deletes evidence
+automatically. Requests waiting on the lock observe the latched failure state
+before writing.
 
 An operator archives and replaces a file only during controlled maintenance
-with the service stopped. Rotation, remote storage, multi-process writers,
-Windows support, `fsync` policy, or cryptographic tamper evidence each require
-a separate design and review.
+with the service stopped. The candidate issues `fsync` after each append but
+does not claim crash-proof durability; stronger durability guarantees require a
+separate design. Rotation, remote storage, multi-process writers, Windows
+support, or cryptographic tamper evidence each also require separate review.
 
 ## Tests required before implementation is accepted
 
