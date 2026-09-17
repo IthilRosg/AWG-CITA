@@ -31,6 +31,24 @@
   endpoints or address data.
 - A read failure returns a generic error code, not command output.
 
+## Designed V0.3 audit evidence boundary
+
+Persistent evidence is not enabled in V0.2. The proposed narrow V0.3 scope is
+documented in [AUDIT_EVIDENCE_DESIGN.md](AUDIT_EVIDENCE_DESIGN.md): an
+operator-opt-in, POSIX-local append-only JSONL file containing a newly
+constructed, aggregate-only projection of sampled accepted `GET /api/status`
+results. This is a local disk side effect, while the service remains read-only
+with respect to AWG and peer configuration. It is not an API route, database,
+remote log sink, peer audit trail, or tamper-proof ledger.
+
+The design requires explicit absolute-path configuration, a retained
+descriptor opened through no-follow POSIX traversal, restrictive
+service-account permissions, interval sampling, a fixed byte limit, serialized
+append/flush, and generic fail-closed behavior on a write error. It must not
+retain raw dumps, exception details, stderr, request metadata, peer lists, keys,
+endpoints, addresses, configurations, credentials, tokens or client
+identifiers.
+
 ## Explicit non-goals
 
 V0 does not create, suspend, rotate, revoke or delete peers. It does not issue a
