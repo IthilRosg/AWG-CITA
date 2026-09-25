@@ -146,7 +146,10 @@ class CanaryPeerController:
                  endpoint_host: str | None = None, dns_server: str | None = None,
                  expected_obfuscation: dict[str, str] | None = None,
                  expected_interface_address: str | None = None,
-                 expected_listen_port: int | None = None) -> None:
+                 expected_listen_port: int | None = None,
+                 client_allowed_ips: str = '0.0.0.0/0',
+                 client_mtu: int | None = None,
+                 client_keepalive: int = 25) -> None:
         self._read_config = read_config
         self._read_dump = read_dump
         self._clock = clock
@@ -158,6 +161,19 @@ class CanaryPeerController:
         self._expected_obfuscation = expected_obfuscation
         self._expected_interface_address = expected_interface_address
         self._expected_listen_port = expected_listen_port
+        if not isinstance(client_allowed_ips, str) or not 1 <= len(client_allowed_ips) <= 128:
+            raise ValueError('invalid client template')
+        try:
+            networks = [ipaddress.ip_network(item.strip(), strict=True) for item in client_allowed_ips.split(',')]
+        except ValueError as error:
+            raise ValueError('invalid client template') from error
+        if (not 1 <= len(networks) <= 8 or any(network.version != 4 for network in networks) or
+            type(client_mtu) not in (int, type(None)) or (client_mtu is not None and not 1280 <= client_mtu <= 1500) or
+            type(client_keepalive) is not int or not 0 <= client_keepalive <= 120):
+            raise ValueError('invalid client template')
+        self._client_allowed_ips = client_allowed_ips
+        self._client_mtu = client_mtu
+        self._client_keepalive = client_keepalive
 
     def list_clients(self) -> list[ClientRecord]:
         persisted = PersistentCanaryConfig(self._read_config())
@@ -291,15 +307,17 @@ class CanaryPeerController:
         except ValueError as error:
             raise ValueError('invalid canary DNS') from error
         required_obfuscation = ('S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4')
-        if not isinstance(self._expected_obfuscation, dict) or set(self._expected_obfuscation) != set(required_obfuscation):
+        if not isinstance(self._expected_obfuscation, dict) or set(self._expected_obfuscation) not in (frozenset(), frozenset(required_obfuscation)):
             raise ValueError('missing canary obfuscation profile')
         extras = []
-        for key in required_obfuscation:
+        for key in self._expected_obfuscation:
             value = fields.get(key)
             if (value is None or not value.isascii() or not value.isdecimal() or
                     not 0 <= int(value) <= 4294967295 or value != self._expected_obfuscation[key]):
                 raise ValueError('unexpected canary obfuscation profile')
             extras.append(f'{key} = {value}')
+        if not self._expected_obfuscation and any(key in fields for key in required_obfuscation):
+            raise ValueError('unexpected canary obfuscation profile')
         present_j = [key for key in ('Jc', 'Jmin', 'Jmax') if key in fields]
         if present_j and len(present_j) != 3:
             raise ValueError('partial canary obfuscation profile')
@@ -311,8 +329,12 @@ class CanaryPeerController:
                 extras.append(f'{key} = {value}')
         if present_j and int(fields['Jmin']) > int(fields['Jmax']):
             raise ValueError('unexpected canary obfuscation profile')
+        if not self._expected_obfuscation and present_j:
+            raise ValueError('unexpected canary obfuscation profile')
         header_protection = fields.get('HeaderProtectionKey')
         if header_protection is not None:
+            if not self._expected_obfuscation:
+                raise ValueError('unexpected canary obfuscation profile')
             _valid_key(header_protection.encode('ascii'))
             if runtime_header_protection is None or runtime_header_protection() != header_protection:
                 raise ValueError('canary header protection differs from runtime')
@@ -330,9 +352,10 @@ class CanaryPeerController:
         if client_id in {item['id'] for item in before}:
             raise ValueError('canary client id collision')
         config_text = '\n'.join(['[Interface]', f'PrivateKey = {private}', f'Address = {address}',
-                                 f'DNS = {dns_server}', *extras, '', '[Peer]', f'PublicKey = {server_public_key.decode("ascii")}',
-                                 f'Endpoint = {self._endpoint_host}:{listen_port}', 'AllowedIPs = 0.0.0.0/0',
-                                 'PersistentKeepalive = 25', ''])
+                                 f'DNS = {dns_server}', *([f'MTU = {self._client_mtu}'] if self._client_mtu is not None else []),
+                                 *extras, '', '[Peer]', f'PublicKey = {server_public_key.decode("ascii")}',
+                                 f'Endpoint = {self._endpoint_host}:{listen_port}', f'AllowedIPs = {self._client_allowed_ips}',
+                                 f'PersistentKeepalive = {self._client_keepalive}', ''])
         import segno
         qr_uri = segno.make_qr(config_text).png_data_uri(scale=4)
         if not isinstance(qr_uri, str) or not qr_uri.startswith('data:image/png;base64,') or len(qr_uri) > 65536:
@@ -406,12 +429,18 @@ class RealAwgLifecycleAdapter:
     _HELPER = '/usr/local/sbin/awg-cita-peer'
     _ID = re.compile(r'peer-[A-Za-z0-9_-]{1,64}\Z')
 
-    def __init__(self, helper: Callable[[str, str | None], dict[str, Any]] | None = None) -> None:
-        self._helper = helper or self._invoke
+    def __init__(self, helper: Callable[[str, str | None], dict[str, Any]] | None = None,
+                 *, profile: str | None = None) -> None:
+        if profile not in (None, 'awg2', 'wg'):
+            raise ValueError('invalid peer profile')
+        self._helper = helper or (lambda operation, client_id: self._invoke(operation, client_id, profile))
 
     @classmethod
-    def _invoke(cls, operation: str, client_id: str | dict[str, Any] | None) -> dict[str, Any]:
+    def _invoke(cls, operation: str, client_id: str | dict[str, Any] | None,
+                profile: str | None = None) -> dict[str, Any]:
         if operation not in {'list', 'enable', 'disable', 'delete', 'create', 'config'}:
+            raise LifecycleError('invalid_request')
+        if profile not in (None, 'awg2', 'wg'):
             raise LifecycleError('invalid_request')
         if operation == 'create':
             if (not isinstance(client_id, dict) or set(client_id) != {'name', 'tags', 'idempotencyKey'} or
@@ -424,7 +453,8 @@ class RealAwgLifecycleAdapter:
         elif (client_id is None) != (operation == 'list') or (client_id is not None and not isinstance(client_id, str)) or (isinstance(client_id, str) and not cls._ID.fullmatch(client_id)):
             raise LifecycleError('invalid_request')
         from .app import AwgReader
-        argv = ('/usr/bin/sudo', '-n', '--', cls._HELPER, operation)
+        argv = ('/usr/bin/sudo', '-n', '--', cls._HELPER, operation) if profile is None else (
+            '/usr/bin/sudo', '-n', '--', '/usr/local/sbin/awg-cita-profile', profile, operation)
         if operation == 'create':
             out, err = AwgReader._run(argv, ACTION_HELPER_TIMEOUT, argument.encode('ascii'))
         elif client_id is not None:

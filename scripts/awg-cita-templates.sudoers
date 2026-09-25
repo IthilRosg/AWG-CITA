@@ -1,0 +1,2 @@
+Cmnd_Alias AWG_CITA_TEMPLATES = /usr/local/sbin/awg-cita-template awg3 show, /usr/local/sbin/awg-cita-template awg3 update, /usr/local/sbin/awg-cita-template awg2 show, /usr/local/sbin/awg-cita-template awg2 update, /usr/local/sbin/awg-cita-template wg show, /usr/local/sbin/awg-cita-template wg update
+awg-manager ALL=(root) NOPASSWD: AWG_CITA_TEMPLATES

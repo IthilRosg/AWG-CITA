@@ -1,14 +1,15 @@
 # AWG CITA
 
-A security-first, self-hosted operator console for **AmneziaWG**.
+A security-first, self-hosted operator console for **AmneziaWG and WireGuard**.
 
 ## Status
 
-Version 0.1.2 provides interface state, safe
-peer metadata, traffic counters, a client dossier, bounded in-memory status
-history and a localized operator UI. It also contains a canary-only peer
-lifecycle candidate with create, enable, disable, delete and repeat
-configuration retrieval on the explicitly enabled canary interface.
+Version 0.2.0 provides interface state, safe peer metadata, traffic counters,
+a client dossier, bounded status history and a localized operator UI. The
+authenticated client registry supports isolated AWG 3.1, AWG 2.0 and plain
+WireGuard interfaces with create, enable, disable, delete, and repeat
+configuration/QR retrieval. The Profiles menu edits templates for future
+client configurations. See [the profile design](docs/MULTI_PROFILE_0_2_0.md).
 
 ## Product boundary
 
@@ -36,8 +37,8 @@ privileged shell access. It is designed around a narrow, allowlisted data model:
 ## Inspiration and compatibility
 
 The project takes no code, assets or branding from other panels. Broader projects
-such as Amnezia-Web-Panel are useful for feature comparison, but AWG CITA keeps a
-single-protocol, least-privilege operational scope.
+such as Amnezia-Web-Panel are useful for feature comparison, while AWG CITA
+keeps fixed, separate interfaces and a narrow privileged helper for each.
 
 ## Publishing gate
 

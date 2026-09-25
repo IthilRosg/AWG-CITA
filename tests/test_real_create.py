@@ -304,6 +304,28 @@ class RealCreateTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             controller.create('New Device', [], 'request-0006', lambda: self.fail('key generation'), lambda: SERVER_PUBLIC)
 
+    def test_plain_wireguard_profile_omits_amnezia_fields(self):
+        profile = PROFILE
+        for key, value in EXPECTED_OBFUSCATION.items():
+            profile = profile.replace(f'{key} = {value}\n'.encode(), b'')
+        state = {'config': profile, 'runtime': set(PersistentCanaryConfig(profile).peers())}
+        def cas(before, after):
+            self.assertEqual(state['config'], before)
+            state['config'] = after
+        def sync():
+            state['runtime'] = {key for key, status in PersistentCanaryConfig(state['config']).peers().items() if status == 'enabled'}
+        controller = _CanaryPeerController(lambda: state['config'], lambda: dump(state),
+                                           write_config=cas, sync_runtime=sync,
+                                           endpoint_host='panel.example', dns_server='127.0.0.1',
+                                           expected_obfuscation={},
+                                           expected_interface_address='127.0.0.1/24', expected_listen_port=51820)
+        with patch('segno.make_qr') as qr:
+            qr.return_value.png_data_uri.return_value = 'data:image/png;base64,Zml4dHVyZQ=='
+            result = controller.create('New Device', [], 'request-wg-0001',
+                                       lambda: (CLIENT_PRIVATE, CLIENT_PUBLIC), lambda: SERVER_PUBLIC)
+        for key in (*EXPECTED_OBFUSCATION, 'Jc', 'Jmin', 'Jmax', 'HeaderProtectionKey'):
+            self.assertNotIn(f'{key} =', result['configText'])
+
     def test_interface_address_drift_fails_before_key_generation(self):
         profile = PROFILE.replace(b'Address = 127.0.0.1/24\n', b'Address = 127.0.1.1/24\n')
         state = {'config': profile, 'runtime': set(PersistentCanaryConfig(profile).peers())}
