@@ -381,7 +381,7 @@ class RateLimitRelayTests(unittest.TestCase):
         body = json.dumps({'idempotencyKey': 'public-disable-01', 'reason': 'operator_requested'}).encode()
         trusted = {'Cookie': cookie, 'Origin': 'https://' + HOST + ':8444',
                    'X-CSRF-Token': csrf, 'Sec-Fetch-Site': 'same-origin', 'Content-Type': 'application/json'}
-        self.assertEqual(self.raw_status('POST', path, body, dict(trusted, **{'X-CSRF-Token': 'wrong'})), 403)
+        self.assertEqual(self.request('POST', path, body, dict(trusted, **{'X-CSRF-Token': 'wrong'}))[0], 403)
         status, _, result = self.request('POST', path, body, trusted)
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(result)['client']['status'], 'DISABLED')
