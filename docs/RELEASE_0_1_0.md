@@ -44,12 +44,21 @@ wheel.
   unauthenticated request and replaced a forged identity header with the
   authenticated test account before forwarding. This does not replace an
   authenticated end-to-end check of the live public route.
+- A controlled temporary peer was created, disabled, enabled and deleted on
+  the installed canary candidate. One-time configuration and QR were checked
+  in memory, then discarded. Persistent and runtime state returned to the one
+  protected original peer. The only persistent addition is the intended
+  idempotency nonce marker; a trailing blank line remains after deletion.
+  Action audit contains matched intent/result pairs for the successful cycle
+  and for two earlier failed create attempts. No secret markers appeared in
+  audit bytes.
 - Reachable Git history and the intended public file set were scanned for
   embedded credentials, private-key files, host-specific markers and large or
   binary artifacts. Flagged assignments were synthetic test fixtures. The
-  server's protected configuration and backup remain private. Production
-  create/enable/disable/delete, audit reconciliation, rollback and final
-  cleanup remain open gates before publishing `0.1.0`.
+  server's protected configuration and backup remain private. Live public
+  authenticated-route identity verification, final rollback rehearsal,
+  package/version review and server cleanup remain open gates before
+  publishing `0.1.0`.
 
 ## After 0.1.0
 

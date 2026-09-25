@@ -51,6 +51,13 @@ root-owned `current` symlink only during the reviewed service change, and keep
 the previous release intact for rollback. No service account may write the
 link, a release directory, or any Python module loaded by the root helper.
 
+If the application unit uses `ProtectSystem=full`, its sudo-invoked root helper
+inherits the same read-only mount namespace. Permit only the AWG configuration
+directory with `ReadWritePaths=/etc/amnezia/amneziawg`; keep that directory
+root-owned mode 0700 and the canary file mode 0600. Verify that the service
+user still cannot write the file and that the helper can complete a synthetic
+write/restart/rollback test before live actions.
+
 In the Caddy `reverse_proxy` block reached only after `basic_auth`, add:
 
 ```caddyfile

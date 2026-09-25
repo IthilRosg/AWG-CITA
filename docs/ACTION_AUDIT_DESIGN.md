@@ -68,4 +68,6 @@ performed with the service stopped; capacity exhaustion fails closed.
 The installed canary candidate implements the single-account check and action
 log. Linux CI exercises the failure tests with synthetic data; an isolated copy
 of the installed proxy block passed header-replacement checks. A controlled
-production mutation and audit reconciliation remain release acceptance checks.
+temporary peer completed create/disable/enable/delete with paired action audit
+events and protected-peer readback. Live public authenticated-route identity
+verification remains a release acceptance check.

@@ -55,5 +55,6 @@ limits are operational controls, not operator authorization.
 The application writes a separate durable intent/result action log and fails
 closed if it cannot append. A missing result after a possible mutation requires
 operator reconciliation before restart. The installed proxy block passed an
-isolated Basic Auth header-replacement test. Live authenticated route and
-controlled production mutation checks remain release gates.
+isolated Basic Auth header-replacement test. A temporary canary peer completed
+the full lifecycle with protected-peer readback and action audit. The live
+authenticated-route identity check remains a release gate.

@@ -68,12 +68,13 @@ has a separate, durable JSONL intent/result log tied to one configured operator
 account. It fails closed on write failure or an unmatched intent at startup.
 The account ID cannot distinguish people who share credentials.
 
-Before action mode can be released, verify the exact installed revision, the
-live authenticated route, action audit reconciliation and a controlled canary
-mutation cycle. The installed proxy block was tested in isolation for identity
-replacement; an end-to-end check of the live authenticated route and production
-rollback acceptance remain open. Linux CI exercises the privileged helper and
-failure paths against synthetic files.
+Before action mode can be released, verify the exact installed revision and
+live authenticated route, then complete final rollback and package review.
+The installed proxy block was tested in isolation for identity replacement,
+and a temporary peer completed create/disable/enable/delete with matched,
+secret-safe audit pairs and protected-peer readback. An end-to-end identity
+check of the live authenticated route remains open. Linux CI exercises the
+privileged helper and failure paths against synthetic files.
 
 ## Release requirements
 
