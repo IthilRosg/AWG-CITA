@@ -838,6 +838,26 @@
   const testMode = !realCanary && shell?.dataset.testMode === 'true';
   const testAdapter = testMode ? window.__AWG_CITA_ADAPTER__ : null;
   const adapter = testAdapter || (realCanary ? new RealCanaryAdapter() : new MockLifecycleAdapter());
+  const realCanaryCopy = {
+    ru: {
+      stateDescription: 'Состояние по AWG read-back',
+      adapterMock: 'REAL CANARY',
+      clientsSubtitle: 'Поиск, фильтры и карточки по данным awg-canary0.',
+      configBoundary: 'Конфигурация доступна только при создании peer',
+      previewResultCopy: 'Результат получен от awg-canary0.',
+      footerText: 'AWG CITA / КАНАРНЫЙ КОНТУР',
+      footerMode: 'REAL CANARY · AWG READ-BACK'
+    },
+    en: {
+      stateDescription: 'State from AWG read-back',
+      adapterMock: 'REAL CANARY',
+      clientsSubtitle: 'Search, filters, and client details from awg-canary0.',
+      configBoundary: 'Configuration is available only when a peer is created',
+      previewResultCopy: 'Result received from awg-canary0.',
+      footerText: 'AWG CITA / CANARY ENVIRONMENT',
+      footerMode: 'REAL CANARY · AWG READ-BACK'
+    }
+  };
   const CREATE_PENDING_KEY = 'awg-cita-canary-create-pending';
   function readPendingCreate() {
     try {
@@ -936,7 +956,8 @@
   function applyTranslations() {
     document.documentElement.lang = state.locale;
     document.querySelectorAll('[data-i18n]').forEach((node) => {
-      node.textContent = t(node.dataset.i18n);
+      const key = node.dataset.i18n;
+      node.textContent = (realCanary && realCanaryCopy[state.locale]?.[key]) || t(key);
     });
     document.querySelectorAll('[data-i18n-placeholder]').forEach((node) => {
       node.placeholder = t(node.dataset.i18nPlaceholder);

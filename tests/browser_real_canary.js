@@ -48,6 +48,9 @@ async function main() {
     page.on('response', (response) => { if (response.status() >= 400) networkErrors.push(`${response.status()} ${response.url()}`); });
     await page.goto(`${url}#clients`);
     await page.waitForFunction(() => document.querySelector('#app')?.getAttribute('aria-busy') === 'false');
+    if ((await page.locator('[data-i18n="adapterMock"]').textContent()).trim() !== 'REAL CANARY') throw new Error('real runtime still displays the mock adapter label');
+    if ((await page.locator('[data-i18n="footerMode"]').textContent()).includes('MOCK')) throw new Error('real runtime still displays the mock footer');
+    if ((await page.locator('[data-i18n="stateDescription"]').textContent()).includes('frontend state')) throw new Error('real runtime still displays the fixture state description');
     if ((await page.locator(`#client-rows [data-client-id="${id}"]`).count()) !== 1) throw new Error('initial peer missing');
     await openAction(page, 'disable');
     const token = await page.locator('meta[name="csrf-token"]').getAttribute('content');
