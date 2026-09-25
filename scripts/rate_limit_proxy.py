@@ -184,8 +184,8 @@ if __name__=="__main__":
  import grp
  import pwd
  owner=pwd.getpwnam("awg-manager").pw_uid
- group=grp.getgrnam("caddy").gr_gid
+ group=grp.getgrnam("awg-cita-relay").gr_gid
  if os.geteuid()!=owner or group not in (os.getegid(),*os.getgroups()):
-  raise PermissionError("relay identity or caddy group unavailable")
+  raise PermissionError("relay identity or socket group unavailable")
  with RelayServer(RELAY_SOCKET,Handler,owner_uid=owner,group_gid=group) as server:
   server.serve_forever()

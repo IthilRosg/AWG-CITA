@@ -37,6 +37,13 @@ reject a missing or different identifier. The audit file must be owned by the
 service account and mode 0600; startup refuses an unmatched prior intent until
 an operator reconciles the peer state.
 
+The private relay socket uses a dedicated `awg-cita-relay` group. Run the
+relay as `awg-manager` with that group, create its `/run/awg-cita-relay`
+directory as `awg-manager:awg-cita-relay` mode 0750, and grant the Caddy
+service only supplementary membership in `awg-cita-relay`. The socket is mode
+0660. Do not grant the relay process the Caddy service group: that group can
+read the proxy configuration on installations where it owns the Caddyfile.
+
 In the Caddy `reverse_proxy` block reached only after `basic_auth`, add:
 
 ```caddyfile
