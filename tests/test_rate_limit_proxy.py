@@ -274,7 +274,7 @@ class RateLimitRelayTests(unittest.TestCase):
         headers = {'Cookie': COOKIE, 'Origin': 'https://' + HOST + ':8444',
                    'X-CSRF-Token': 'synthetic-csrf', 'Content-Type': 'application/json'}
         body = json.dumps({'idempotencyKey': 'test-01', 'reason': 'operator_requested'}).encode()
-        statuses = [self.request('POST', path, body, headers)[0] for _ in range(7)]
+        statuses = [self.raw_status('POST', path, body, headers) for _ in range(7)]
         self.assertEqual(statuses[:6], [200] * 6)
         self.assertEqual(statuses[-1], 429)
         self.assertEqual(len(Backend.posts), 6)
@@ -299,8 +299,8 @@ class RateLimitRelayTests(unittest.TestCase):
         path = '/api/clients/peer-0123456789abcdef/disable'
         headers = {'Cookie': COOKIE, 'Origin': 'https://' + HOST + ':8444',
                    'X-CSRF-Token': 'synthetic-csrf', 'Content-Type': 'application/json'}
-        self.assertEqual(self.request('POST', path, b'{}', dict(headers, **{'Transfer-Encoding': ''}))[0], 400)
-        self.assertEqual(self.request('POST', path, b'{}', dict(headers, **{'Content-Length': '0' * 5000}))[0], 400)
+        self.assertEqual(self.raw_status('POST', path, b'{}', dict(headers, **{'Transfer-Encoding': ''})), 400)
+        self.assertEqual(self.raw_status('POST', path, b'{}', dict(headers, **{'Content-Length': '0' * 5000})), 400)
         self.assertEqual(Backend.posts, [])
 
     def test_action_concurrency_slots_refuse_before_forwarding(self):
@@ -310,7 +310,7 @@ class RateLimitRelayTests(unittest.TestCase):
             path = '/api/clients/peer-0123456789abcdef/disable'
             headers = {'Cookie': COOKIE, 'Origin': 'https://' + HOST + ':8444',
                        'X-CSRF-Token': 'synthetic-csrf', 'Content-Type': 'application/json'}
-            self.assertEqual(self.request('POST', path, b'{}', headers)[0], 429)
+            self.assertEqual(self.raw_status('POST', path, b'{}', headers), 429)
             self.assertEqual(Backend.posts, [])
         finally:
             for _ in range(3):
@@ -381,7 +381,7 @@ class RateLimitRelayTests(unittest.TestCase):
         body = json.dumps({'idempotencyKey': 'public-disable-01', 'reason': 'operator_requested'}).encode()
         trusted = {'Cookie': cookie, 'Origin': 'https://' + HOST + ':8444',
                    'X-CSRF-Token': csrf, 'Sec-Fetch-Site': 'same-origin', 'Content-Type': 'application/json'}
-        self.assertEqual(self.request('POST', path, body, dict(trusted, **{'X-CSRF-Token': 'wrong'}))[0], 403)
+        self.assertEqual(self.raw_status('POST', path, body, dict(trusted, **{'X-CSRF-Token': 'wrong'})), 403)
         status, _, result = self.request('POST', path, body, trusted)
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(result)['client']['status'], 'DISABLED')
