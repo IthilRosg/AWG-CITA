@@ -527,11 +527,15 @@ class _Handler(BaseHTTPRequestHandler):
         profile_match = _PROFILE_ACTION_RE.fullmatch(path)
         profile_list = _PROFILE_CLIENTS_RE.fullmatch(path)
         template_match = _PROFILE_TEMPLATE_RE.fullmatch(path)
+        profile_config = _PROFILE_CONFIG_RE.fullmatch(path)
+        canary_config = _CANARY_CONFIG_RE.fullmatch(path)
         match = _CANARY_ROUTE_RE.fullmatch(path)
         create = path == '/api/clients' or profile_list is not None
         service = (self.profile_services.get(profile_match.group(1)) if profile_match else
-                   self.profile_services.get(profile_list.group(1)) if profile_list else self.lifecycle_service)
-        if (match is None and profile_match is None and not create and template_match is None) or service is None:
+                   self.profile_services.get(profile_list.group(1)) if profile_list else
+                   self.profile_services.get(profile_config.group(1)) if profile_config else self.lifecycle_service)
+        if (match is None and profile_match is None and not create and template_match is None and
+                profile_config is None and canary_config is None) or service is None:
             self._json(404, {'error_code': 'not_found'})
             return
         kinds = self.headers.get_all('Content-Type')
@@ -575,16 +579,24 @@ class _Handler(BaseHTTPRequestHandler):
 
         try:
             payload = json.loads(body, object_pairs_hook=unique_pairs)
-            operation = 'template' if template_match else 'create' if create else profile_match.group(3) if profile_match else match.group(2)
-            client_id = '' if create or template_match else profile_match.group(2) if profile_match else match.group(1)
+            operation = ('template' if template_match else 'create' if create else 'config_update' if profile_config or canary_config else
+                         profile_match.group(3) if profile_match else match.group(2))
+            client_id = ('' if create or template_match else profile_config.group(2) if profile_config else
+                         canary_config.group(1) if canary_config else profile_match.group(2) if profile_match else match.group(1))
             keys = ({'dns_server', 'allowed_ips', 'mtu', 'keepalive', 'idempotencyKey'} if template_match else
                     {'name', 'tags', 'idempotencyKey', 'acknowledged'} if create else
+                    {'dns_server', 'allowed_ips', 'mtu', 'keepalive', 'expectedRevision', 'idempotencyKey'} if operation == 'config_update' else
                     {'disable': {'idempotencyKey', 'reason'}, 'enable': {'idempotencyKey'},
                      'delete': {'idempotencyKey', 'confirmation'}}[operation])
             if not isinstance(payload, dict) or set(payload) != keys or not isinstance(payload['idempotencyKey'], str):
                 raise LifecycleError('invalid_request')
             if template_match:
                 from .client_templates import validate
+                validate({key: payload[key] for key in ('dns_server', 'allowed_ips', 'mtu', 'keepalive')})
+            if operation == 'config_update':
+                from .client_config_edit import validate_revision
+                from .client_templates import validate
+                validate_revision(payload['expectedRevision'])
                 validate({key: payload[key] for key in ('dns_server', 'allowed_ips', 'mtu', 'keepalive')})
         except (ValueError, UnicodeError, LifecycleError):
             self._json(400, {'error_code': 'invalid_request'})
@@ -593,7 +605,7 @@ class _Handler(BaseHTTPRequestHandler):
         actor = self._operator_actor()
         correlation_id = secrets.token_hex(16)
         nonce_digest = hashlib.sha256(payload['idempotencyKey'].encode('utf-8')).hexdigest()
-        audit_profile = (template_match.group(1) if template_match else profile_match.group(1) if profile_match else
+        audit_profile = (template_match.group(1) if template_match else profile_config.group(1) if profile_config else profile_match.group(1) if profile_match else
                          profile_list.group(1) if profile_list else 'awg3')
         audit_operation = audit_profile + '_' + operation if template_match or audit_profile != 'awg3' else operation
         if self.action_audit_log is not None:
@@ -608,6 +620,10 @@ class _Handler(BaseHTTPRequestHandler):
             if template_match:
                 result = _template_request(template_match.group(1),
                                            {key: payload[key] for key in ('dns_server', 'allowed_ips', 'mtu', 'keepalive')})
+            elif operation == 'config_update':
+                result = service.update_configuration(client_id, payload['expectedRevision'],
+                                                      {key: payload[key] for key in ('dns_server', 'allowed_ips', 'mtu', 'keepalive')},
+                                                      payload['idempotencyKey'])
             elif create:
                 result = service.create_client(payload['name'], payload['tags'],
                                                               payload['idempotencyKey'], payload['acknowledged'])

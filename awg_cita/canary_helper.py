@@ -276,6 +276,7 @@ def _store_client_config(client_id: str, config_text: str) -> None:
 
 
 def _load_client_config(client_id: str, controller: CanaryPeerController) -> dict[str, object]:
+    from .client_config_edit import revision
     client = next((record for record in controller.list_clients() if record['id'] == client_id), None)
     if client is None or not any('peer-' + hashlib.sha256(base64.b64decode(key)).hexdigest()[:16] == client_id
                                  for key in controller._mutable_keys):
@@ -305,7 +306,19 @@ def _load_client_config(client_id: str, controller: CanaryPeerController) -> dic
     import segno
     qr_uri = segno.make_qr(config_text).png_data_uri(scale=4)
     return {'schema_version': 1, 'client': client, 'configText': config_text,
-            'qrDataUri': qr_uri}
+            'qrDataUri': qr_uri, 'revision': revision(config_text)}
+
+
+def _update_client_config(client_id: str, controller: CanaryPeerController,
+                          expected_revision: str, settings: dict[str, object]) -> dict[str, object]:
+    from .client_config_edit import atomic_replace, replace_editable
+    current = _load_client_config(client_id, controller)
+    if current['revision'] != expected_revision:
+        raise ValueError('saved configuration changed')
+    replacement = replace_editable(current['configText'], settings)
+    if replacement != current['configText']:
+        atomic_replace(_config_path(client_id), current['configText'], replacement)
+    return _load_client_config(client_id, controller)
 
 
 def _read_create_request() -> dict[str, object]:
@@ -339,12 +352,16 @@ def _read_create_request() -> dict[str, object]:
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     if os.geteuid() != 0 or not ((len(args) == 1 and args[0] == 'list') or
-                                  (len(args) == 2 and args[0] in {'disable', 'enable', 'delete', 'config'} and _ID.fullmatch(args[1])) or
+                                  (len(args) == 2 and args[0] in {'disable', 'enable', 'delete', 'config', 'config-update'} and _ID.fullmatch(args[1])) or
                                   (len(args) == 1 and args[0] == 'create')):
         print('invalid canary operation', file=sys.stderr)
         return 64
     try:
         request = _read_create_request() if args[0] == 'create' else None
+        update_request = None
+        if args[0] == 'config-update':
+            from .client_config_edit import read_update_request
+            update_request = read_update_request()
         with _locked():
             controller = _controller()
             if args[0] == 'list':
@@ -355,6 +372,8 @@ def main(argv: list[str] | None = None) -> int:
                                            _runtime_header_protection)
             elif args[0] == 'config':
                 result = _load_client_config(args[1], controller)
+            elif args[0] == 'config-update':
+                result = _update_client_config(args[1], controller, *update_request)
             else:
                 value = controller.mutate(args[0], args[1])
                 if args[0] == 'delete':

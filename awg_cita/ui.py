@@ -116,16 +116,19 @@ INDEX_HTML = """<!doctype html>
             </dl>
             <div id="preview-result-boundary" class="preview-boundary" data-i18n="previewNoPeerCreated">NO PEER CREATED · KEYS / CONFIG / QR NOT GENERATED</div>
             <div id="create-real-result" hidden>
-              <p id="create-one-time-warning" class="preview-boundary preview-boundary-danger" role="alert">Private configuration is available in the client menu. Use AmneziaWG 3.1.</p>
-              <label class="form-field" for="create-config-text"><span>Configuration · private</span>
-                <textarea id="create-config-text" readonly spellcheck="false" autocomplete="off" rows="9"></textarea>
-              </label>
-              <div class="create-qr-wrap"><canvas id="create-qr" role="img" aria-label="One-time client configuration QR · private" width="220" height="220"></canvas></div>
-              <p id="create-qr-caption" class="modal-copy">QR contains the private .conf for compatible scanners. Scanner compatibility is unverified; download .conf is recommended.</p>
               <div class="create-result-actions">
+                <button id="create-config-download" class="button button-primary" type="button">Download .conf</button>
                 <button id="create-config-copy" class="button" type="button">Copy configuration</button>
-                <button id="create-config-download" class="button" type="button">Download .conf</button>
               </div>
+              <details class="config-disclosure"><summary id="create-qr-summary">Показать QR</summary>
+                <div class="create-qr-wrap"><canvas id="create-qr" role="img" aria-label="Client configuration QR · private" width="220" height="220"></canvas></div>
+                <p id="create-qr-caption" class="modal-copy">QR contains the private .conf for compatible scanners.</p>
+              </details>
+              <details class="config-disclosure"><summary id="create-text-summary">Показать текст .conf</summary>
+                <label class="form-field" for="create-config-text"><span>Configuration · private</span>
+                  <textarea id="create-config-text" readonly spellcheck="false" autocomplete="off" rows="8"></textarea>
+                </label>
+              </details>
             </div>
           </div>
 
@@ -217,6 +220,7 @@ INDEX_HTML = """<!doctype html>
             <div class="config-tabs" role="tablist" aria-label="Configuration preview format">
               <button id="config-preview-tab-qr" class="config-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="config-preview-qr-panel" data-config-tab="qr" data-i18n="configQrTab">QR</button>
               <button id="config-preview-tab-config" class="config-tab" type="button" role="tab" aria-selected="false" aria-controls="config-preview-config-panel" data-config-tab="config" data-i18n="configTextTab">CONFIG</button>
+              <button id="config-preview-tab-edit" class="config-tab" type="button" role="tab" aria-selected="false" aria-controls="config-preview-edit-panel" data-config-tab="edit" hidden>Параметры</button>
             </div>
             <section id="config-preview-qr-panel" class="config-tab-panel" role="tabpanel" aria-labelledby="config-preview-tab-qr">
               <div id="config-preview-qr" class="mock-qr" role="img" aria-label="Mock QR preview"><span>MOCK QR</span></div>
@@ -226,11 +230,22 @@ INDEX_HTML = """<!doctype html>
             <section id="config-preview-config-panel" class="config-tab-panel" role="tabpanel" aria-labelledby="config-preview-tab-config" hidden>
               <pre id="config-preview-text" class="mock-config"># MOCK CONFIGURATION</pre>
             </section>
+            <section id="config-preview-edit-panel" class="config-tab-panel" role="tabpanel" aria-labelledby="config-preview-tab-edit" hidden>
+              <p id="config-edit-intro" class="modal-copy">Изменения сохраняются для повторной выдачи этого клиента. Ключи и параметры сервера не меняются.</p>
+              <form id="config-edit-form" class="config-edit-grid">
+                <label>DNS <input name="dns_server" type="text" autocomplete="off" required></label>
+                <label>AllowedIPs <input name="allowed_ips" type="text" autocomplete="off" required></label>
+                <label>MTU <input name="mtu" type="number" min="1280" max="1500" required></label>
+                <label>Keepalive <input name="keepalive" type="number" min="0" max="120" required></label>
+                <div id="config-edit-status" role="status"></div>
+                <button id="config-edit-save" class="button button-primary" type="submit">Сохранить параметры</button>
+              </form>
+            </section>
           </div>
           <div class="modal-actions">
+            <button id="config-preview-download" class="button button-primary" type="button" data-i18n="downloadMock">Скачать mock</button>
             <button id="config-preview-copy" class="button" type="button" data-i18n="copyConfig">Копировать</button>
-            <button id="config-preview-download" class="button" type="button" data-i18n="downloadMock">Скачать mock</button>
-            <button id="config-preview-close-action" class="button button-primary" type="button" data-i18n="close">Закрыть</button>
+            <button id="config-preview-close-action" class="button button-quiet" type="button" data-i18n="close">Закрыть</button>
           </div>
         </section>
       </div>

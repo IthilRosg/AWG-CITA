@@ -438,14 +438,25 @@ class RealAwgLifecycleAdapter:
     @classmethod
     def _invoke(cls, operation: str, client_id: str | dict[str, Any] | None,
                 profile: str | None = None) -> dict[str, Any]:
-        if operation not in {'list', 'enable', 'disable', 'delete', 'create', 'config'}:
+        if operation not in {'list', 'enable', 'disable', 'delete', 'create', 'config', 'config-update'}:
             raise LifecycleError('invalid_request')
         if profile not in (None, 'awg2', 'wg'):
             raise LifecycleError('invalid_request')
-        if operation == 'create':
-            if (not isinstance(client_id, dict) or set(client_id) != {'name', 'tags', 'idempotencyKey'} or
-                not isinstance(client_id['name'], str) or not isinstance(client_id['tags'], list) or
-                not isinstance(client_id['idempotencyKey'], str)):
+        if operation in {'create', 'config-update'}:
+            if operation == 'create':
+                valid = (isinstance(client_id, dict) and set(client_id) == {'name', 'tags', 'idempotencyKey'} and
+                         isinstance(client_id['name'], str) and isinstance(client_id['tags'], list) and
+                         isinstance(client_id['idempotencyKey'], str))
+            else:
+                from .client_config_edit import validate_revision
+                from .client_templates import validate
+                try:
+                    valid = (isinstance(client_id, dict) and set(client_id) == {'clientId', 'expectedRevision', 'settings'} and
+                             isinstance(client_id['clientId'], str) and bool(cls._ID.fullmatch(client_id['clientId'])) and
+                             bool(validate_revision(client_id['expectedRevision'])) and bool(validate(client_id['settings'])))
+                except (ValueError, KeyError, TypeError):
+                    valid = False
+            if not valid:
                 raise LifecycleError('invalid_request')
             argument = json.dumps(client_id, ensure_ascii=True, separators=(',', ':'))
             if len(argument) > 1024:
@@ -455,14 +466,18 @@ class RealAwgLifecycleAdapter:
         from .app import AwgReader
         argv = ('/usr/bin/sudo', '-n', '--', cls._HELPER, operation) if profile is None else (
             '/usr/bin/sudo', '-n', '--', '/usr/local/sbin/awg-cita-profile', profile, operation)
-        if operation == 'create':
+        if operation in {'create', 'config-update'}:
+            if operation == 'config-update':
+                argv += (client_id['clientId'],)
+                argument = json.dumps({'expectedRevision': client_id['expectedRevision'], 'settings': client_id['settings']},
+                                      ensure_ascii=True, separators=(',', ':'))
             out, err = AwgReader._run(argv, ACTION_HELPER_TIMEOUT, argument.encode('ascii'))
         elif client_id is not None:
             argv += (client_id,)
             out, err = AwgReader._run(argv, ACTION_HELPER_TIMEOUT)
         else:
             out, err = AwgReader._run(argv, 15)
-        if err or len(out.encode('utf-8')) > (131072 if operation in {'create', 'config'} else 65536):
+        if err or len(out.encode('utf-8')) > (131072 if operation in {'create', 'config', 'config-update'} else 65536):
             raise LifecycleError('awg_command_failed')
 
         def unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -542,12 +557,28 @@ class RealAwgLifecycleAdapter:
         if not isinstance(client_id, str) or not re.fullmatch(r'peer-[0-9a-f]{16}', client_id):
             raise LifecycleError('invalid_request')
         value = self._helper('config', client_id)
-        if (not isinstance(value, dict) or set(value) != {'schema_version', 'client', 'configText', 'qrDataUri'} or
+        if (not isinstance(value, dict) or set(value) != {'schema_version', 'client', 'configText', 'qrDataUri', 'revision'} or
                 type(value['schema_version']) is not int or value['schema_version'] != 1 or
                 not isinstance(value['configText'], str) or not 1 <= len(value['configText']) <= 2400 or
                 not isinstance(value['qrDataUri'], str) or not value['qrDataUri'].startswith('data:image/png;base64,') or
-                len(value['qrDataUri']) > 65536):
+                len(value['qrDataUri']) > 65536 or not re.fullmatch(r'[0-9a-f]{64}', value['revision'])):
             raise LifecycleError('awg_command_failed')
         if self._record(value['client'])['id'] != client_id:
+            raise LifecycleError('awg_command_failed')
+        return value
+
+    def update_configuration(self, client_id: str, expected_revision: str,
+                             settings: dict[str, object]) -> dict[str, Any]:
+        from .client_config_edit import validate_revision
+        from .client_templates import validate
+        try:
+            validate_revision(expected_revision)
+            normalized = validate(settings)
+        except (ValueError, TypeError) as error:
+            raise LifecycleError('invalid_request') from error
+        value = self._helper('config-update', {'clientId': client_id,
+                                               'expectedRevision': expected_revision, 'settings': normalized})
+        if (not isinstance(value, dict) or value.get('client', {}).get('id') != client_id or
+                not re.fullmatch(r'[0-9a-f]{64}', str(value.get('revision', '')))):
             raise LifecycleError('awg_command_failed')
         return value

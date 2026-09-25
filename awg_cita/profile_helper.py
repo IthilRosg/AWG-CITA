@@ -217,6 +217,7 @@ class ProfileOps:
             os.close(directory)
 
     def load_config(self, client_id: str, controller: CanaryPeerController) -> dict[str, object]:
+        from .client_config_edit import revision
         client = next((item for item in controller.list_clients() if item['id'] == client_id), None)
         if client is None:
             raise ValueError('peer not found')
@@ -235,11 +236,27 @@ class ProfileOps:
             raise ValueError('stored client config mismatch')
         import segno
         qr_uri = segno.make_qr(config_text).png_data_uri(scale=4)
-        return {'schema_version': 1, 'client': client, 'configText': config_text, 'qrDataUri': qr_uri}
+        return {'schema_version': 1, 'client': client, 'configText': config_text, 'qrDataUri': qr_uri,
+                'revision': revision(config_text)}
+
+    def update_config(self, client_id: str, controller: CanaryPeerController,
+                      expected_revision: str, settings: dict[str, object]) -> dict[str, object]:
+        from .client_config_edit import atomic_replace, replace_editable
+        current = self.load_config(client_id, controller)
+        if current['revision'] != expected_revision:
+            raise ValueError('saved configuration changed')
+        replacement = replace_editable(current['configText'], settings)
+        if replacement != current['configText']:
+            atomic_replace(self.config_path(client_id), current['configText'], replacement)
+        return self.load_config(client_id, controller)
 
     def execute(self, args: list[str]) -> dict[str, object]:
         operation = args[0]
         request = _read_create_request() if operation == 'create' else None
+        update_request = None
+        if operation == 'config-update':
+            from .client_config_edit import read_update_request
+            update_request = read_update_request()
         with self.locked():
             controller = self.controller()
             if operation == 'list':
@@ -251,6 +268,8 @@ class ProfileOps:
                                          self.store_config)
             if operation == 'config':
                 return self.load_config(args[1], controller)
+            if operation == 'config-update':
+                return self.update_config(args[1], controller, *update_request)
             value = controller.mutate(operation, args[1])
             if operation == 'delete':
                 self.config_path(args[1]).unlink(missing_ok=True)
@@ -262,7 +281,7 @@ def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     if (os.geteuid() != 0 or len(args) not in (2, 3) or args[0] not in _INTERFACES or
         not ((len(args) == 2 and args[1] in {'list', 'create'}) or
-             (len(args) == 3 and args[1] in {'config', 'enable', 'disable', 'delete'} and _ID.fullmatch(args[2])))):
+             (len(args) == 3 and args[1] in {'config', 'config-update', 'enable', 'disable', 'delete'} and _ID.fullmatch(args[2])))):
         print('invalid profile operation', file=sys.stderr)
         return 64
     try:
