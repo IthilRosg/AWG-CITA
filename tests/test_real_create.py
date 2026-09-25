@@ -53,7 +53,7 @@ class RelayCreateTests(unittest.TestCase):
             headers = {'Cookie': COOKIE, 'Origin': 'https://' + HOST + ':8444', 'X-CSRF-Token': 'synthetic-csrf', 'Content-Type': 'application/json'}
             self.assertEqual(case.request('POST', '/api/clients', request, headers)[0], 403)
             self.assertEqual(len(Backend.posts), 1)
-            self.assertEqual(case.request('POST', '/api/clients?trick=1', request, headers)[0], 404)
+            self.assertEqual(case.raw_status('POST', '/api/clients?trick=1', request, headers), 404)
             self.assertEqual(len(Backend.posts), 1)
         finally:
             case.tearDown()
