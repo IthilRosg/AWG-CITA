@@ -35,7 +35,6 @@ class UiTests(unittest.TestCase):
             'id="create-preview-modal"',
             'id="preview-name"',
             'id="preview-tags"',
-            'id="preview-ack"',
             'id="preview-submit"',
             'id="preview-result-boundary"',
             'id="mutation-boundary"',
@@ -52,6 +51,9 @@ class UiTests(unittest.TestCase):
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, INDEX_HTML)
+        for marker in ('id="preview-ack"', 'id="preview-step-confirm"', 'id="status-client-modal"'):
+            with self.subTest(absent=marker):
+                self.assertNotIn(marker, INDEX_HTML)
 
         self.assertIn('data-lang="ru"', INDEX_HTML)
         self.assertIn('data-lang="en"', INDEX_HTML)
@@ -113,7 +115,7 @@ class UiTests(unittest.TestCase):
                 self.assertIn(marker, script)
 
         self.assertTrue(script.startswith("(() => {"))
-        self.assertTrue(script.endswith("})();"))
+        self.assertTrue(script.rstrip().endswith("})();"))
         self.assertNotIn("method: 'POST'", script)
         self.assertNotIn("method: 'DELETE'", script)
 

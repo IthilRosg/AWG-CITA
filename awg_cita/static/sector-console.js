@@ -139,15 +139,7 @@
       clientEnabled: 'Клиент включён в mock state',
       clientDisabled: 'Клиент отключён в mock state',
       clientDeleted: 'Mock record клиента удалён',
-      statusEyebrow: 'CLIENT LIFECYCLE / MOCK',
-      statusDialogTitle: 'Изменить состояние',
-      closeStatus: 'Закрыть диалог состояния',
-      statusEnableCopy: 'Клиент будет включён только в frontend mock state.',
-      statusDisableCopy: 'Отключение требует подтверждения и изменит только frontend mock state.',
-      statusConfirmEnable: 'Подтвердить включение',
-      statusConfirmDisable: 'Подтвердить отключение',
       statusAdapterError: 'Состояние клиента не было изменено.',
-      mockActionBoundary: 'Изменение выполняется только в frontend mock state; production peer не затрагивается.',
       deleteEyebrow: 'DESTRUCTIVE ACTION / MOCK',
       deleteDialogTitle: 'Удалить клиента?',
       deleteDialogCopy: 'Проверьте имя клиента и подтвердите удаление только из frontend mock state.',
@@ -219,10 +211,9 @@
       activityEmpty: 'Событий пока нет.',
       previewEyebrow: 'CONTROLLED LIFECYCLE / PREVIEW',
       previewDialogTitle: 'Создание клиента · preview',
-      previewDialogCopy: 'Проверка метаданных и подтверждение без создания peer, ключей, конфигурации или QR.',
+      previewDialogCopy: 'Проверка метаданных без создания peer, ключей, конфигурации или QR.',
       closePreview: 'Закрыть preview',
-      previewStepDetails: 'Шаг 1 / Метаданные',
-      previewStepConfirm: 'Шаг 2 / Подтверждение',
+      previewStepDetails: 'Данные клиента',
       previewStepResult: 'Результат / Dry run',
       previewNameLabel: 'Имя клиента',
       previewNamePlaceholder: 'Например, Field Laptop',
@@ -230,12 +221,7 @@
       previewTagsLabel: 'Tags · необязательно',
       previewTagsPlaceholder: 'field, review',
       previewTagsHint: 'До 5 tags через запятую, без секретов и connection data.',
-      previewSummaryName: 'Имя',
-      previewSummaryTags: 'Tags',
-      previewAckLabel: 'Я понимаю: это только preview; peer и секретные материалы не создаются.',
-      previewNext: 'Продолжить',
-      previewBack: 'Назад',
-      previewSubmit: 'Подтвердить preview',
+      previewSubmit: 'Запустить preview',
       previewCancel: 'Отмена',
       previewDone: 'Готово',
       previewResultHeading: 'Preview принят',
@@ -249,9 +235,7 @@
       previewNameInvalid: 'Имя должно содержать 2–48 безопасных символов.',
       previewTagsInvalid: 'Каждый tag должен содержать 1–24 безопасных символа.',
       previewTagsTooMany: 'Можно указать не более пяти tags.',
-      previewAckRequired: 'Подтвердите, что понимаете preview boundary.',
       previewAdapterError: 'Preview не был подготовлен.',
-      realCreateAckRequired: 'Подтвердите создание реального peer.',
       realCreateError: 'Результат создания не подтверждён. Проверьте список клиентов перед повторной попыткой.',
       realQrError: 'QR не удалось отобразить; скачайте .conf вместо него.'
     },
@@ -376,15 +360,7 @@
       clientEnabled: 'Client enabled in mock state',
       clientDisabled: 'Client disabled in mock state',
       clientDeleted: 'Client mock record deleted',
-      statusEyebrow: 'CLIENT LIFECYCLE / MOCK',
-      statusDialogTitle: 'Change client state',
-      closeStatus: 'Close state dialog',
-      statusEnableCopy: 'The client will be enabled only in frontend mock state.',
-      statusDisableCopy: 'Disabling requires confirmation and changes only frontend mock state.',
-      statusConfirmEnable: 'Confirm enable',
-      statusConfirmDisable: 'Confirm disable',
       statusAdapterError: 'The client state was not changed.',
-      mockActionBoundary: 'This change runs only in frontend mock state; no production peer is touched.',
       deleteEyebrow: 'DESTRUCTIVE ACTION / MOCK',
       deleteDialogTitle: 'Delete client?',
       deleteDialogCopy: 'Review the client name and confirm deletion from frontend mock state only.',
@@ -456,10 +432,9 @@
       activityEmpty: 'No events yet.',
       previewEyebrow: 'CONTROLLED LIFECYCLE / PREVIEW',
       previewDialogTitle: 'Create client · preview',
-      previewDialogCopy: 'Validate metadata and confirm without creating a peer, keys, configuration, or QR.',
+      previewDialogCopy: 'Validate metadata without creating a peer, keys, configuration, or QR.',
       closePreview: 'Close preview',
-      previewStepDetails: 'Step 1 / Metadata',
-      previewStepConfirm: 'Step 2 / Confirmation',
+      previewStepDetails: 'Client details',
       previewStepResult: 'Result / Dry run',
       previewNameLabel: 'Client name',
       previewNamePlaceholder: 'For example, Field Laptop',
@@ -467,12 +442,7 @@
       previewTagsLabel: 'Tags · optional',
       previewTagsPlaceholder: 'field, review',
       previewTagsHint: 'Up to 5 comma-separated tags; no secrets or connection data.',
-      previewSummaryName: 'Name',
-      previewSummaryTags: 'Tags',
-      previewAckLabel: 'I understand: this is preview-only; no peer or secret material is created.',
-      previewNext: 'Continue',
-      previewBack: 'Back',
-      previewSubmit: 'Confirm preview',
+      previewSubmit: 'Run preview',
       previewCancel: 'Cancel',
       previewDone: 'Done',
       previewResultHeading: 'Preview accepted',
@@ -486,9 +456,7 @@
       previewNameInvalid: 'The name must contain 2–48 safe characters.',
       previewTagsInvalid: 'Each tag must contain 1–24 safe characters.',
       previewTagsTooMany: 'Use no more than five tags.',
-      previewAckRequired: 'Acknowledge that you understand the preview boundary.',
       previewAdapterError: 'Preview could not be prepared.',
-      realCreateAckRequired: 'Confirm creation of a real peer.',
       realCreateError: 'Creation outcome is uncertain. Check the client list before retrying.',
       realQrError: 'QR could not be rendered; download the .conf instead.'
     }
@@ -597,7 +565,6 @@
       name: '',
       tagsInput: '',
       tags: [],
-      acknowledged: false,
       submitting: false,
       error: '',
       result: null
@@ -1519,23 +1486,16 @@
     const modal = $('create-preview-modal');
     modal.hidden = !wizard.open;
     modal.setAttribute('aria-hidden', String(!wizard.open));
-    document.body.classList.toggle('modal-open', wizard.open || state.editClient.open || state.statusClient.open || state.deleteClient.open || state.configPreview.open);
+    document.body.classList.toggle('modal-open', wizard.open || state.editClient.open || state.deleteClient.open || state.configPreview.open);
     $('preview-step-form').hidden = !wizard.open || wizard.step !== 'form';
-    $('preview-step-confirm').hidden = !wizard.open || wizard.step !== 'confirm';
     $('preview-step-result').hidden = !wizard.open || wizard.step !== 'result';
     $('preview-form-error').hidden = !wizard.error;
     $('preview-form-error').textContent = wizard.error ? t(wizard.error) : '';
     $('preview-name').value = wizard.name;
     $('preview-tags').value = wizard.tagsInput;
-    $('preview-ack').checked = wizard.acknowledged;
-    $('preview-confirm-name').textContent = wizard.name || '—';
-    $('preview-confirm-tags').textContent = wizard.tags.length ? wizard.tags.join(', ') : t('noTags');
     $('preview-cancel').hidden = !wizard.open || wizard.step === 'result';
-    $('preview-back').hidden = !wizard.open || wizard.step !== 'confirm';
-    $('preview-next').hidden = !wizard.open || wizard.step !== 'form';
-    $('preview-submit').hidden = !wizard.open || wizard.step !== 'confirm';
+    $('preview-submit').hidden = !wizard.open || wizard.step !== 'form';
     $('preview-done').hidden = !wizard.open || wizard.step !== 'result';
-    $('preview-next').disabled = wizard.submitting;
     $('preview-submit').disabled = wizard.submitting || Boolean(realCanary && pendingCreate);
     if (realCanary) {
       let notice = $('create-reconcile');
@@ -1544,7 +1504,7 @@
         notice.id = 'create-reconcile';
         notice.className = 'notice notice-error';
         notice.setAttribute('role', 'alert');
-        notice.innerHTML = '<p id="create-reconcile-detail"></p><button id="create-reconcile-check" class="button" type="button"></button> <button id="create-reconcile-resolve" class="button" type="button"></button>';
+        notice.innerHTML = '<p id="create-reconcile-detail"></p><button id="create-reconcile-check" class="button" type="button"></button>';
         $('preview-step-form').after(notice);
       }
       notice.hidden = !wizard.open || !pendingCreate;
@@ -1552,31 +1512,30 @@
         const ru = state.locale === 'ru';
         const candidates = createCandidates.map(c => `${c.id} (${c.name})`).join(', ');
         $('create-reconcile-detail').textContent = `${ru ? 'Исход Create неизвестен. Повтор запрещён; private key и .conf нельзя восстановить. Попытка nonce:' : 'Create outcome unknown. Retry blocked; private key and .conf cannot be recovered. Attempt nonce:'} ${pendingCreate.nonce}. ${ru ? 'Проверьте список и вручную разрешите возможный orphan:' : 'Check public list and manually resolve possible orphan:'} ${createListChecked ? (candidates || (ru ? 'новый peer не обнаружен' : 'no new peer found')) : (ru ? 'проверка ожидается' : 'check pending')}`;
-        $('create-reconcile-check').textContent = ru ? 'Проверить список' : 'Check list';
-        $('create-reconcile-check').disabled = createChecking || wizard.submitting;
-        $('create-reconcile-resolve').textContent = ru ? 'Подтвердить разрешение' : 'Confirm resolved';
-        $('create-reconcile-resolve').disabled = wizard.submitting || createChecking || !createListChecked || createCandidates.length > 0 || pendingCreate.nonce === 'unavailable';
+        $('create-reconcile-check').textContent = createListChecked && !createCandidates.length
+          ? (ru ? 'Снять блокировку' : 'Clear block')
+          : (ru ? 'Проверить список' : 'Check list');
+        $('create-reconcile-check').disabled = createChecking || wizard.submitting || pendingCreate.nonce === 'unavailable';
       }
     }
     if (realCanary) {
       const ru = state.locale === 'ru';
       const labels = ru ? {
-        button: 'Создать клиента', title: 'Создание клиента · реальный peer', copy: 'Создание peer и одноразовой полной конфигурации на awg-canary0.',
-        ack: 'Я подтверждаю создание реального peer и получение одноразовой конфигурации с private key и QR.', submit: 'Создать peer',
+        button: 'Создать клиента', title: 'Создание клиента · реальный peer', intro: 'Создание peer и одноразовой полной конфигурации на awg-canary0.',
+        submit: 'Создать peer',
         result: 'Клиент создан', status: 'Статус', warning: 'Приватная конфигурация показана только сейчас. Сохраните .conf; восстановить private key позже нельзя.',
         config: 'Конфигурация · приватная', qr: 'QR с приватной конфигурацией для совместимых сканеров; совместимость не проверена',
         copy: 'Копировать', download: 'Скачать .conf · рекомендуется', boundary: 'Реальный peer создан · сохраните конфигурацию сейчас'
       } : {
-        button: 'Create client', title: 'Create client · real peer', copy: 'Creates a peer and one-time full-tunnel configuration on awg-canary0.',
-        ack: 'I confirm creation of a real peer and receipt of a one-time private configuration and QR.', submit: 'Create peer',
+        button: 'Create client', title: 'Create client · real peer', intro: 'Creates a peer and one-time full-tunnel configuration on awg-canary0.',
+        submit: 'Create peer',
         result: 'Client created', status: 'Status', warning: 'Private configuration is shown only now. Save the .conf; the private key cannot be recovered later.',
         config: 'Configuration · private', qr: 'QR containing private configuration for compatible scanners; compatibility unverified',
         copy: 'Copy', download: 'Download .conf · recommended', boundary: 'Real peer created · save configuration now'
       };
       $('add-client-button').textContent = labels.button;
       $('preview-dialog-title').textContent = labels.title;
-      $('preview-dialog-copy').textContent = labels.copy;
-      document.querySelector('[for="preview-ack"] span').textContent = labels.ack;
+      $('preview-dialog-copy').textContent = labels.intro;
       $('preview-submit').textContent = labels.submit;
       document.querySelector('#preview-step-result h3').textContent = labels.result;
       document.querySelector('#preview-step-result .modal-copy').textContent = labels.warning;
@@ -1711,22 +1670,6 @@
     $('edit-form-error').hidden = !edit.error;
     $('edit-form-error').textContent = edit.error ? t(edit.error) : '';
     $('edit-save').disabled = edit.submitting;
-  }
-
-  function renderStatusClient() {
-    const status = state.statusClient;
-    const modal = $('status-client-modal');
-    const client = state.clients.find((item) => item.id === status.clientId) || null;
-    modal.hidden = !status.open || !client;
-    modal.setAttribute('aria-hidden', String(!status.open || !client));
-    if (!client) return;
-    const enabling = status.nextStatus === 'ONLINE';
-    $('status-client-name').textContent = client.name;
-    $('status-dialog-copy').textContent = realCanary
-      ? (state.locale === 'ru' ? (enabling ? 'Peer будет включён в конфигурации awg-canary0 и применён после перезапуска.' : 'Peer будет отключён в конфигурации awg-canary0 и применён после перезапуска.') : (enabling ? 'The peer will be enabled in awg-canary0 and applied after restart.' : 'The peer will be disabled in awg-canary0 and applied after restart.'))
-      : t(enabling ? 'statusEnableCopy' : 'statusDisableCopy');
-    $('status-confirm').textContent = t(enabling ? 'statusConfirmEnable' : 'statusConfirmDisable');
-    $('status-confirm').disabled = status.submitting;
   }
 
   function renderDeleteClient() {
@@ -1866,18 +1809,10 @@
 
   function openStatusClient(id, nextStatus) {
     const client = state.clients.find((item) => item.id === id);
-    if (!client) return;
+    if (!client || state.statusClient.submitting) return;
     state.actionMenu = { open: false, clientId: null };
-    state.statusClient = { open: true, clientId: id, nextStatus, submitting: false };
-    render();
-    window.setTimeout(() => $('status-confirm').focus(), 0);
-  }
-
-  function closeStatusClient({ restoreFocus = true } = {}) {
-    const id = state.statusClient.clientId;
-    state.statusClient = { open: false, clientId: null, nextStatus: 'ONLINE', submitting: false };
-    render();
-    if (restoreFocus && id) focusClientAction(id);
+    state.statusClient = { open: false, clientId: id, nextStatus, submitting: false };
+    submitStatusClient();
   }
 
   async function submitStatusClient() {
@@ -1900,9 +1835,10 @@
       showToast(realCanary ? (state.locale === 'ru' ? 'Изменение peer сохранено на сервере' : 'Peer change saved on server') : t(nextStatus === 'ONLINE' ? 'clientEnabled' : 'clientDisabled'), 'success');
       focusClientAction(id);
     } catch (_error) {
-      state.statusClient.submitting = false;
+      state.statusClient = { open: false, clientId: null, nextStatus: 'ONLINE', submitting: false };
       render();
       showToast(t('statusAdapterError'), 'error');
+      focusClientAction(id);
     }
   }
 
@@ -2041,7 +1977,6 @@
       name: '',
       tagsInput: '',
       tags: [],
-      acknowledged: false,
       submitting: false,
       error: '',
       result: null
@@ -2091,18 +2026,7 @@
     return true;
   }
 
-  function advanceCreatePreview() {
-    if (!collectCreatePreviewMetadata()) {
-      render();
-      $('preview-name').focus();
-      return;
-    }
-    state.createPreview.step = 'confirm';
-    render();
-    $('preview-submit').focus();
-  }
-
-  async function checkPendingCreate(resolve = false) {
+  async function checkPendingCreate() {
     if (!realCanary || !pendingCreate || createChecking) return;
     createChecking = true;
     createListChecked = false;
@@ -2112,11 +2036,6 @@
       state.clients = clients;
       createCandidates = clients.filter(c => !pendingCreate.baseline.includes(c.id));
       createListChecked = true;
-      if (resolve && !createCandidates.length && pendingCreate.nonce !== 'unavailable') {
-        localStorage.removeItem(CREATE_PENDING_KEY);
-        pendingCreate = null;
-        createListChecked = false;
-      }
     } catch (_error) {
       createCandidates = [];
       createListChecked = false;
@@ -2127,16 +2046,24 @@
     }
   }
 
+  function clearResolvedCreate() {
+    if (!pendingCreate || pendingCreate.nonce === 'unavailable' || !createListChecked || createChecking || createCandidates.length) return;
+    localStorage.removeItem(CREATE_PENDING_KEY);
+    pendingCreate = null;
+    createListChecked = false;
+    render();
+  }
+
   async function submitCreatePreview() {
+    if (state.createPreview.step !== 'form') return;
     if (realCanary) pendingCreate = pendingCreate || readPendingCreate();
     if (state.createPreview.submitting || (realCanary && (pendingCreate || state.loading || state.error))) {
       render();
       return;
     }
-    if (!state.createPreview.acknowledged) {
-      state.createPreview.error = realCanary ? 'realCreateAckRequired' : 'previewAckRequired';
+    if (!collectCreatePreviewMetadata()) {
       render();
-      $('preview-ack').focus();
+      $('preview-name').focus();
       return;
     }
     state.createPreview.submitting = true;
@@ -2245,7 +2172,6 @@
     renderToasts();
     renderActionMenu();
     renderEditClient();
-    renderStatusClient();
     renderDeleteClient();
     renderConfigPreview();
     renderCreatePreview();
@@ -2410,18 +2336,6 @@
       submitEditClient();
       return;
     }
-    if (event.target.matches('#status-client-modal')) {
-      closeStatusClient();
-      return;
-    }
-    if (event.target.closest('#status-close') || event.target.closest('#status-cancel')) {
-      closeStatusClient();
-      return;
-    }
-    if (event.target.closest('#status-confirm')) {
-      submitStatusClient();
-      return;
-    }
     if (event.target.matches('#delete-client-modal')) {
       closeDeleteClient();
       return;
@@ -2479,23 +2393,11 @@
       closeCreatePreview();
       return;
     }
-    if (event.target.closest('#preview-next')) {
-      advanceCreatePreview();
-      return;
-    }
-    if (event.target.closest('#preview-back')) {
-      state.createPreview.step = 'form';
-      state.createPreview.error = '';
-      render();
-      $('preview-name').focus();
-      return;
-    }
     if (event.target.closest('#create-reconcile-check')) {
-      if (!state.createPreview.submitting) checkPendingCreate();
-      return;
-    }
-    if (event.target.closest('#create-reconcile-resolve')) {
-      if (!state.createPreview.submitting && createListChecked && !createCandidates.length) checkPendingCreate(true);
+      if (!state.createPreview.submitting) {
+        if (createListChecked && !createCandidates.length) clearResolvedCreate();
+        else checkPendingCreate();
+      }
       return;
     }
     if (event.target.closest('#preview-submit')) {
@@ -2588,11 +2490,6 @@
       render();
       return;
     }
-    if (event.target.matches('#preview-ack')) {
-      state.createPreview.acknowledged = event.target.checked;
-      state.createPreview.error = '';
-      $('preview-form-error').hidden = true;
-    }
   });
 
   document.addEventListener('keydown', (event) => {
@@ -2638,11 +2535,6 @@
       if (state.editClient.open) {
         event.preventDefault();
         closeEditClient();
-        return;
-      }
-      if (state.statusClient.open) {
-        event.preventDefault();
-        closeStatusClient();
         return;
       }
       if (state.deleteClient.open) {
