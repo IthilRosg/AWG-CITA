@@ -52,11 +52,16 @@ wheel.
   Action audit contains matched intent/result pairs for the successful cycle
   and for two earlier failed create attempts. No secret markers appeared in
   audit bytes.
+- The installed host retained the prior versioned release. An isolated
+  symlink rehearsal switched from the current release to the prior release
+  and back, importing the package at both targets. The production symlink and
+  services stayed unchanged and healthy. This verifies the switching mechanism,
+  not a live service rollback or a restored peer state after a crash.
 - Reachable Git history and the intended public file set were scanned for
   embedded credentials, private-key files, host-specific markers and large or
   binary artifacts. Flagged assignments were synthetic test fixtures. The
   server's protected configuration and backup remain private. Live public
-  authenticated-route identity verification, final rollback rehearsal,
+  authenticated-route identity verification, live rollback review,
   package/version review and server cleanup remain open gates before
   publishing `0.1.0`.
 
