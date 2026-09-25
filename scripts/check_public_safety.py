@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TEXT_SUFFIXES = {"", ".css", ".md", ".py", ".js", ".json", ".svg", ".toml", ".yml", ".yaml", ".sudoers"}
+TEXT_SUFFIXES = {"", ".conf", ".css", ".md", ".py", ".js", ".json", ".svg", ".toml", ".yml", ".yaml", ".sudoers"}
 FORBIDDEN_NAMES = {".env", ".env.local", ".env.production"}
 FORBIDDEN_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".crt", ".cer"}
 PATTERNS = {

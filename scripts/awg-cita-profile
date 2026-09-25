@@ -1,0 +1,6 @@
+#!/usr/bin/python3 -I
+"""Root-owned fixed entrypoint for AWG-CITA's additional profiles."""
+import sys
+sys.path.insert(0, '/opt/awg-cita/current/site')
+from awg_cita.profile_helper import main
+raise SystemExit(main())

@@ -181,13 +181,17 @@ def _read_protected_config() -> bytes:
     return data
 
 def _controller() -> CanaryPeerController:
+    from .client_templates import read as read_template
     persisted = PersistentCanaryConfig(_read_protected_config())
     protected_key, _route, endpoint, dns, obfuscation, address, port = _protected_peer_profile()
+    template = read_template('awg3', dns)
     protected = {protected_key}
     return CanaryPeerController(_read_protected_config, _read_dump, write_config=_write_config,
                                 sync_runtime=_sync_runtime, mutable_keys=set(persisted.peers()) - protected,
-                                endpoint_host=endpoint, dns_server=dns, expected_obfuscation=obfuscation,
-                                expected_interface_address=address, expected_listen_port=port)
+                                endpoint_host=endpoint, dns_server=template['dns_server'], expected_obfuscation=obfuscation,
+                                expected_interface_address=address, expected_listen_port=port,
+                                client_allowed_ips=template['allowed_ips'], client_mtu=template['mtu'],
+                                client_keepalive=template['keepalive'])
 
 
 def _awg_key(argv: tuple[str, ...], input_key: str | None = None) -> str:

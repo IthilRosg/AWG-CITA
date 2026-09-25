@@ -119,7 +119,8 @@ class Handler(BaseHTTPRequestHandler):
   if actor is None:self.send_error(401);return
   path=urlsplit(self.path).path
   if path=="/api/status" and not permitted():self.send_response(429);self.send_header("Content-Length","0");self.end_headers();return
-  is_client_read=path=="/api/clients" or bool(re.fullmatch(r"/api/clients/peer-[0-9a-f]{16}/config",self.path))
+  is_client_read=(path=="/api/clients" or bool(re.fullmatch(r"/api/clients/peer-[0-9a-f]{16}/config",self.path)) or
+                  bool(re.fullmatch(r"/api/profiles/(?:awg3|awg2|wg)/(?:clients(?:/peer-[0-9a-f]{16}/config)?|template)",self.path)))
   if is_client_read and self.session_cookie() is None:self.send_error(401);return
   if is_client_read and not client_permitted():self.send_error(429);return
   if is_client_read and not action_slots.acquire(blocking=False):self.send_error(429);return
@@ -142,7 +143,10 @@ class Handler(BaseHTTPRequestHandler):
   if self.headers.get_all("Host")!=[HOST]:self.send_error(421);return
   actor=self.operator_id()
   if actor is None:self.send_error(401);return
-  if self.path!="/api/clients" and not re.fullmatch(r"/api/clients/peer-[0-9a-f]{16}/(?:disable|enable|delete)",self.path):self.send_error(404);return
+  if (self.path!="/api/clients" and
+      not re.fullmatch(r"/api/clients/peer-[0-9a-f]{16}/(?:disable|enable|delete)",self.path) and
+      not re.fullmatch(r"/api/profiles/(?:awg3|awg2|wg)/(?:clients(?:/peer-[0-9a-f]{16}/(?:disable|enable|delete))?|template)",self.path)):
+   self.send_error(404);return
   if self.headers.get_all("Origin")!=[ORIGIN]:self.send_error(403);return
   csrf=self.headers.get_all("X-CSRF-Token")
   if csrf is None or len(csrf)!=1 or not csrf[0] or len(csrf[0])>128:self.send_error(403);return

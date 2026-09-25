@@ -33,6 +33,10 @@ INDEX_HTML = """<!doctype html>
           <span class="nav-index">03</span>
           <span data-i18n="navJournal">Журнал</span>
         </button>
+        <button class="nav-item" type="button" data-view="settings" aria-current="false">
+          <span class="nav-index">04</span>
+          <span data-i18n="navSettings">Профили</span>
+        </button>
       </nav>
       <div class="rail-status">
         <span class="signal-dot" aria-hidden="true"></span>
@@ -316,6 +320,12 @@ INDEX_HTML = """<!doctype html>
           <div class="result-summary"><strong id="client-count">—</strong><span data-i18n="records">записей</span></div>
         </div>
 
+        <div class="profile-switch panel" role="group" aria-label="Connection profiles">
+          <button class="profile-choice is-active" type="button" data-client-profile="awg3" aria-pressed="true">AWG 3.1</button>
+          <button class="profile-choice" type="button" data-client-profile="awg2" aria-pressed="false">AWG 2.0 · WireSock</button>
+          <button class="profile-choice" type="button" data-client-profile="wg" aria-pressed="false">WireGuard</button>
+        </div>
+
         <div class="controls panel">
           <label class="search-field" for="client-search">
             <span class="eyebrow" data-i18n="searchLabel">ПОИСК</span>
@@ -418,6 +428,40 @@ INDEX_HTML = """<!doctype html>
               <button id="dossier-config-button" class="button button-block" type="button" data-dossier-action="config" data-i18n="configAction">Сформировать configuration · preview</button>
             </div>
           </aside>
+        </div>
+      </section>
+
+      <section id="settings-view" class="view" data-view-panel="settings" aria-labelledby="settings-heading" hidden>
+        <div class="section-heading"><div>
+          <div class="eyebrow">04 / CONNECTION PROFILES</div>
+          <h2 id="settings-heading" data-i18n="settingsHeading">Профили подключения</h2>
+          <p class="section-subtitle" data-i18n="settingsSubtitle">Параметры ниже применяются только к новым конфигурациям клиентов.</p>
+        </div></div>
+        <div class="profile-settings-grid">
+          <form class="panel profile-settings-card" data-template-profile="awg3">
+            <div class="eyebrow">AWG 3.1 · awg-canary0</div><h3>AWG 3.1</h3>
+            <label><span>DNS</span><input name="dns_server" autocomplete="off" required></label>
+            <label><span>AllowedIPs · IPv4</span><input name="allowed_ips" autocomplete="off" required></label>
+            <label><span>MTU</span><input name="mtu" type="number" min="1280" max="1500" required></label>
+            <label><span>Keepalive</span><input name="keepalive" type="number" min="0" max="120" required></label>
+            <div class="profile-settings-actions"><span data-template-status="awg3" role="status"></span><button class="button" type="submit" data-i18n="saveTemplate">Сохранить</button></div>
+          </form>
+          <form class="panel profile-settings-card" data-template-profile="awg2">
+            <div class="eyebrow">AWG 2.0 · awg-cita2</div><h3>AWG 2.0 · WireSock</h3>
+            <label><span>DNS</span><input name="dns_server" autocomplete="off" required></label>
+            <label><span>AllowedIPs · IPv4</span><input name="allowed_ips" autocomplete="off" required></label>
+            <label><span>MTU</span><input name="mtu" type="number" min="1280" max="1500" required></label>
+            <label><span>Keepalive</span><input name="keepalive" type="number" min="0" max="120" required></label>
+            <div class="profile-settings-actions"><span data-template-status="awg2" role="status"></span><button class="button" type="submit" data-i18n="saveTemplate">Сохранить</button></div>
+          </form>
+          <form class="panel profile-settings-card" data-template-profile="wg">
+            <div class="eyebrow">WIREGUARD · awg-cita-wg</div><h3>WireGuard</h3>
+            <label><span>DNS</span><input name="dns_server" autocomplete="off" required></label>
+            <label><span>AllowedIPs · IPv4</span><input name="allowed_ips" autocomplete="off" required></label>
+            <label><span>MTU</span><input name="mtu" type="number" min="1280" max="1500" required></label>
+            <label><span>Keepalive</span><input name="keepalive" type="number" min="0" max="120" required></label>
+            <div class="profile-settings-actions"><span data-template-status="wg" role="status"></span><button class="button" type="submit" data-i18n="saveTemplate">Сохранить</button></div>
+          </form>
         </div>
       </section>
 

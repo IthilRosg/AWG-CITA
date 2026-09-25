@@ -44,6 +44,10 @@ _PLAIN_HOST_RE = re.compile(r"^([A-Za-z0-9.-]+)(?::([0-9]{1,5}))?$")
 _DNS_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 _CANARY_ROUTE_RE = re.compile(r"^/api/clients/(peer-[0-9a-f]{16})/(disable|enable|delete)$")
 _CANARY_CONFIG_RE = re.compile(r"^/api/clients/(peer-[0-9a-f]{16})/config$")
+_PROFILE_CLIENTS_RE = re.compile(r"^/api/profiles/(awg3|awg2|wg)/clients$")
+_PROFILE_ACTION_RE = re.compile(r"^/api/profiles/(awg3|awg2|wg)/clients/(peer-[0-9a-f]{16})/(disable|enable|delete)$")
+_PROFILE_CONFIG_RE = re.compile(r"^/api/profiles/(awg3|awg2|wg)/clients/(peer-[0-9a-f]{16})/config$")
+_PROFILE_TEMPLATE_RE = re.compile(r"^/api/profiles/(awg3|awg2|wg)/template$")
 _OPERATOR_ID_RE = re.compile(r"[A-Za-z0-9_.@-]{1,64}\Z")
 MAX_AWG_DUMP_BYTES = 1_048_576
 SNAPSHOT_CACHE_TTL_SECONDS = 2.0
@@ -253,6 +257,28 @@ class SnapshotCollector:
             raise
 
 
+def _template_request(profile: str, value: dict[str, object] | None = None) -> dict[str, object]:
+    from .client_templates import validate
+    if profile not in {'awg3', 'awg2', 'wg'}:
+        raise ValueError('invalid profile')
+    if value is not None:
+        value = validate(value)
+    argv = ('/usr/bin/sudo', '-n', '--', '/usr/local/sbin/awg-cita-template', profile,
+            'show' if value is None else 'update')
+    try:
+        raw, err = AwgReader._run(argv, 10, None if value is None else json.dumps(value, separators=(',', ':')).encode('ascii'))
+        if err or len(raw) > 2048:
+            raise ValueError('template helper failed')
+        result = json.loads(raw)
+        if (not isinstance(result, dict) or set(result) != {'schema_version', 'profile', 'template'} or
+            result['schema_version'] != 1 or result['profile'] != profile or
+            validate(result['template']) != result['template']):
+            raise ValueError('invalid template helper response')
+        return result
+    except Exception:
+        raise LifecycleError('awg_command_failed') from None
+
+
 class _Handler(BaseHTTPRequestHandler):
     reader: AwgReader
     collector: SnapshotCollector
@@ -263,6 +289,7 @@ class _Handler(BaseHTTPRequestHandler):
     require_operator_header: bool
     test_mode: bool
     lifecycle_service: LifecycleService | None
+    profile_services: dict[str, LifecycleService]
     operator_origin: str | None
     operator_id: str | None
     sessions: dict[str, tuple[str, float, str]]
@@ -422,22 +449,36 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/history":
             self._json(200, {"schema_version": 1, "history": self.history.records()})
             return
-        if path == '/api/clients' and self.lifecycle_service is not None:
+        template_match = _PROFILE_TEMPLATE_RE.fullmatch(self.path)
+        if template_match is not None and self.lifecycle_service is not None:
             if self._session_token() is None:
                 self._json(401, {'error_code': 'unauthorized'})
                 return
             try:
-                self._json(200, {'schema_version': 1, 'clients': self.lifecycle_service.list_clients()})
+                self._json(200, _template_request(template_match.group(1)))
             except LifecycleError as error:
                 self._json(self._lifecycle_status(error), {'error_code': error.code})
             return
-        config_match = _CANARY_CONFIG_RE.fullmatch(self.path)
-        if config_match is not None and self.lifecycle_service is not None:
+        profile_list = _PROFILE_CLIENTS_RE.fullmatch(self.path)
+        list_service = self.profile_services.get(profile_list.group(1)) if profile_list else self.lifecycle_service if self.path == '/api/clients' else None
+        if list_service is not None:
             if self._session_token() is None:
                 self._json(401, {'error_code': 'unauthorized'})
                 return
             try:
-                self._json(200, self.lifecycle_service.get_configuration(config_match.group(1)))
+                self._json(200, {'schema_version': 1, 'clients': list_service.list_clients()})
+            except LifecycleError as error:
+                self._json(self._lifecycle_status(error), {'error_code': error.code})
+            return
+        profile_config = _PROFILE_CONFIG_RE.fullmatch(self.path)
+        config_match = _CANARY_CONFIG_RE.fullmatch(self.path)
+        config_service = self.profile_services.get(profile_config.group(1)) if profile_config else self.lifecycle_service if config_match else None
+        if config_service is not None:
+            if self._session_token() is None:
+                self._json(401, {'error_code': 'unauthorized'})
+                return
+            try:
+                self._json(200, config_service.get_configuration(profile_config.group(2) if profile_config else config_match.group(1)))
             except LifecycleError as error:
                 self._json(self._lifecycle_status(error), {'error_code': error.code})
             return
@@ -482,9 +523,15 @@ class _Handler(BaseHTTPRequestHandler):
         if self.lifecycle_service is None:
             self._method_not_allowed()
             return
-        match = _CANARY_ROUTE_RE.fullmatch(self.path)
-        create = self.path == '/api/clients'
-        if match is None and not create:
+        path = self.path
+        profile_match = _PROFILE_ACTION_RE.fullmatch(path)
+        profile_list = _PROFILE_CLIENTS_RE.fullmatch(path)
+        template_match = _PROFILE_TEMPLATE_RE.fullmatch(path)
+        match = _CANARY_ROUTE_RE.fullmatch(path)
+        create = path == '/api/clients' or profile_list is not None
+        service = (self.profile_services.get(profile_match.group(1)) if profile_match else
+                   self.profile_services.get(profile_list.group(1)) if profile_list else self.lifecycle_service)
+        if (match is None and profile_match is None and not create and template_match is None) or service is None:
             self._json(404, {'error_code': 'not_found'})
             return
         kinds = self.headers.get_all('Content-Type')
@@ -528,13 +575,17 @@ class _Handler(BaseHTTPRequestHandler):
 
         try:
             payload = json.loads(body, object_pairs_hook=unique_pairs)
-            operation = 'create' if create else match.group(2)
-            client_id = '' if create else match.group(1)
-            keys = ({'name', 'tags', 'idempotencyKey', 'acknowledged'} if create else
+            operation = 'template' if template_match else 'create' if create else profile_match.group(3) if profile_match else match.group(2)
+            client_id = '' if create or template_match else profile_match.group(2) if profile_match else match.group(1)
+            keys = ({'dns_server', 'allowed_ips', 'mtu', 'keepalive', 'idempotencyKey'} if template_match else
+                    {'name', 'tags', 'idempotencyKey', 'acknowledged'} if create else
                     {'disable': {'idempotencyKey', 'reason'}, 'enable': {'idempotencyKey'},
                      'delete': {'idempotencyKey', 'confirmation'}}[operation])
             if not isinstance(payload, dict) or set(payload) != keys or not isinstance(payload['idempotencyKey'], str):
                 raise LifecycleError('invalid_request')
+            if template_match:
+                from .client_templates import validate
+                validate({key: payload[key] for key in ('dns_server', 'allowed_ips', 'mtu', 'keepalive')})
         except (ValueError, UnicodeError, LifecycleError):
             self._json(400, {'error_code': 'invalid_request'})
             return
@@ -542,25 +593,31 @@ class _Handler(BaseHTTPRequestHandler):
         actor = self._operator_actor()
         correlation_id = secrets.token_hex(16)
         nonce_digest = hashlib.sha256(payload['idempotencyKey'].encode('utf-8')).hexdigest()
+        audit_profile = (template_match.group(1) if template_match else profile_match.group(1) if profile_match else
+                         profile_list.group(1) if profile_list else 'awg3')
+        audit_operation = audit_profile + '_' + operation if template_match or audit_profile != 'awg3' else operation
         if self.action_audit_log is not None:
             try:
                 self.action_audit_log.record_action(phase='INTENT', correlation_id=correlation_id,
-                                                    actor=actor, operation=operation, client_id=client_id,
+                                                    actor=actor, operation=audit_operation, client_id=client_id,
                                                     nonce_digest=nonce_digest)
             except Exception:
                 self._json(503, {'error_code': 'audit_write_failed'})
                 return
         try:
-            if create:
-                result = self.lifecycle_service.create_client(payload['name'], payload['tags'],
+            if template_match:
+                result = _template_request(template_match.group(1),
+                                           {key: payload[key] for key in ('dns_server', 'allowed_ips', 'mtu', 'keepalive')})
+            elif create:
+                result = service.create_client(payload['name'], payload['tags'],
                                                               payload['idempotencyKey'], payload['acknowledged'])
                 client_id = result['client']['id']
             elif operation == 'disable':
-                result = {'schema_version': 1, 'client': self.lifecycle_service.disable_client(client_id, payload['idempotencyKey'], payload['reason'])}
+                result = {'schema_version': 1, 'client': service.disable_client(client_id, payload['idempotencyKey'], payload['reason'])}
             elif operation == 'enable':
-                result = {'schema_version': 1, 'client': self.lifecycle_service.enable_client(client_id, payload['idempotencyKey'])}
+                result = {'schema_version': 1, 'client': service.enable_client(client_id, payload['idempotencyKey'])}
             else:
-                result = self.lifecycle_service.delete_client(client_id, payload['idempotencyKey'], payload['confirmation'])
+                result = service.delete_client(client_id, payload['idempotencyKey'], payload['confirmation'])
             status, response, outcome = 200, result, 'OK'
         except LifecycleError as error:
             status, response, outcome = self._lifecycle_status(error), {'error_code': error.code}, error.code
@@ -569,7 +626,7 @@ class _Handler(BaseHTTPRequestHandler):
         if self.action_audit_log is not None:
             try:
                 self.action_audit_log.record_action(phase='RESULT', correlation_id=correlation_id,
-                                                    actor=actor, operation=operation, client_id=client_id,
+                                                    actor=actor, operation=audit_operation, client_id=client_id,
                                                     nonce_digest=nonce_digest, result=outcome)
             except Exception:
                 self._json(503, {'error_code': 'audit_write_failed'})
@@ -643,6 +700,7 @@ def create_server(
     *,
     test_mode: bool = False,
     lifecycle_service: LifecycleService | None = None,
+    profile_services: dict[str, LifecycleService] | None = None,
     operator_origin: str | None = None,
     unix_socket_path: str | None = None,
     operator_id: str | None = None,
@@ -651,6 +709,12 @@ def create_server(
 ) -> ThreadingHTTPServer:
     if host not in _LOOPBACK_HOSTS:
         raise ValueError("AWG CITA must bind to a loopback address")
+    if profile_services is not None and (lifecycle_service is None or
+                                         not isinstance(profile_services, dict) or
+                                         not set(profile_services) <= {'awg3', 'awg2', 'wg'} or
+                                         any(not isinstance(item, LifecycleService) for item in profile_services.values()) or
+                                         profile_services.get('awg3') not in (None, lifecycle_service)):
+        raise ValueError('invalid profile services')
     if allowed_hosts is not None and not all(_valid_allowed_host(value) for value in allowed_hosts):
         raise ValueError("allowed_hosts must contain canonical hostnames or IP addresses")
     if lifecycle_service is not None and (not operator_origin or urlsplit(operator_origin).scheme not in {'http', 'https'} or
@@ -678,6 +742,7 @@ def create_server(
     Handler.require_operator_header = require_operator_header or not test_mode
     Handler.test_mode = test_mode
     Handler.lifecycle_service = lifecycle_service
+    Handler.profile_services = {'awg3': lifecycle_service, **(profile_services or {})} if lifecycle_service is not None else {}
     Handler.operator_origin = operator_origin
     Handler.operator_id = operator_id
     Handler.sessions = {}

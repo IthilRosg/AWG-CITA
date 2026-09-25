@@ -107,6 +107,45 @@ class CanaryHttpTests(unittest.TestCase):
         self.assertEqual(json.loads(body)['configText'], config)
         self.assertEqual(self.request('GET', path + '?copy=1', headers={'Cookie': cookie})[0], 404)
 
+    def test_profile_routes_keep_client_inventories_separate(self):
+        handler = self.server.RequestHandlerClass
+        handler.profile_services['awg2'] = LifecycleService(FakeAwgLifecycleAdapter([RECORD]))
+        handler.profile_services['wg'] = LifecycleService(FakeAwgLifecycleAdapter([]))
+        _, headers, html = self.request('GET', '/')
+        csrf = re.search(r'<meta name="csrf-token" content="([^"]+)">', html).group(1)
+        cookie = headers['Set-Cookie'].split(';', 1)[0]
+        for profile in ('awg2', 'wg'):
+            path = f'/api/profiles/{profile}/clients'
+            self.assertEqual(self.request('GET', path)[0], 401)
+            self.assertEqual(len(json.loads(self.request('GET', path, headers={'Cookie': cookie})[2])['clients']), 1 if profile == 'awg2' else 0)
+            self.assertEqual(self.request('GET', path + '?copy=1', headers={'Cookie': cookie})[0], 404)
+        self.assertEqual(len(json.loads(self.request('GET', '/api/profiles/awg3/clients', headers={'Cookie': cookie})[2])['clients']), 1)
+        trusted = {'Cookie': cookie, 'Origin': self.origin, 'X-CSRF-Token': csrf, 'Content-Type': 'application/json'}
+        payload = json.dumps({'idempotencyKey': 'awg2-test-0001', 'reason': 'operator_requested'})
+        status, _, _ = self.request('POST', f'/api/profiles/awg2/clients/{PEER_ID}/disable', payload, trusted)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(self.request('GET', '/api/profiles/awg2/clients', headers={'Cookie': cookie})[2])['clients'][0]['status'], 'DISABLED')
+        self.assertEqual(json.loads(self.request('GET', '/api/profiles/awg3/clients', headers={'Cookie': cookie})[2])['clients'][0]['status'], 'NEVER')
+        self.assertEqual(json.loads(self.request('GET', '/api/profiles/wg/clients', headers={'Cookie': cookie})[2])['clients'], [])
+
+    def test_template_update_requires_csrf_and_is_profile_scoped(self):
+        _, headers, html = self.request('GET', '/')
+        csrf = re.search(r'<meta name="csrf-token" content="([^"]+)">', html).group(1)
+        cookie = headers['Set-Cookie'].split(';', 1)[0]
+        template = {'dns_server': '127.0.0.1', 'allowed_ips': '0.0.0.0/0', 'mtu': 1420, 'keepalive': 25}
+        reply = json.dumps({'schema_version': 1, 'profile': 'wg', 'template': template})
+        path = '/api/profiles/wg/template'
+        with patch.object(AwgReader, '_run', return_value=(reply, '')) as run:
+            self.assertEqual(self.request('GET', path)[0], 401)
+            self.assertEqual(self.request('GET', path, headers={'Cookie': cookie})[0], 200)
+            payload = json.dumps({**template, 'idempotencyKey': 'template-wg-0001'})
+            basic = {'Cookie': cookie, 'Content-Type': 'application/json'}
+            self.assertEqual(self.request('POST', path, payload, basic)[0], 403)
+            trusted = {**basic, 'Origin': self.origin, 'X-CSRF-Token': csrf}
+            self.assertEqual(self.request('POST', path, payload, trusted)[0], 200)
+            self.assertEqual(self.request('POST', path + '?x=1', payload, trusted)[0], 404)
+            self.assertEqual(run.call_args.args[0][-2:], ('wg', 'update'))
+
     def test_identity_and_action_audit_fail_closed(self):
         class ActionAudit:
             def __init__(self):

@@ -23,6 +23,10 @@
       navOverview: 'Обзор',
       navClients: 'Клиенты',
       navJournal: 'Журнал',
+      navSettings: 'Профили',
+      settingsHeading: 'Профили подключения',
+      settingsSubtitle: 'Параметры применяются только к новым конфигурациям клиентов.',
+      saveTemplate: 'Сохранить',
       mockBoundary: 'UI READY / BACKEND STUB',
       railBoundary: 'Мутации отключены',
       perimeter: 'ЛОКАЛЬНЫЙ КОНТУР',
@@ -244,6 +248,10 @@
       navOverview: 'Overview',
       navClients: 'Clients',
       navJournal: 'Journal',
+      navSettings: 'Profiles',
+      settingsHeading: 'Connection profiles',
+      settingsSubtitle: 'These values apply only to new client configurations.',
+      saveTemplate: 'Save',
       mockBoundary: 'UI READY / BACKEND STUB',
       railBoundary: 'Mutations disabled',
       perimeter: 'LOCAL PERIMETER',
@@ -532,8 +540,9 @@
   };
 
   const state = {
-    currentView: ['clients', 'journal'].includes(window.location.hash.slice(1)) ? window.location.hash.slice(1) : 'overview',
+    currentView: ['clients', 'journal', 'settings'].includes(window.location.hash.slice(1)) ? window.location.hash.slice(1) : 'overview',
     locale: 'ru',
+    selectedProfile: 'awg3',
     clients: [],
     statusHistory: [],
     auditEvents: [],
@@ -748,6 +757,8 @@
   }
 
   class RealCanaryAdapter extends MockLifecycleAdapter {
+    constructor() { super(); this.profile = 'awg3'; }
+    basePath() { return this.profile === 'awg3' ? '/api/clients' : `/api/profiles/${this.profile}/clients`; }
     async request(path, body) {
       const response = await fetch(path, {
         method: body === undefined ? 'GET' : 'POST',
@@ -765,7 +776,7 @@
     }
 
     async listClients() {
-      const result = await this.request('/api/clients');
+      const result = await this.request(this.basePath());
       if (result?.schema_version !== 1 || !Array.isArray(result.clients)) throw new Error('malformed_adapter_result');
       return result.clients;
     }
@@ -784,7 +795,7 @@
       const payload = { idempotencyKey: crypto.randomUUID() };
       if (operation === 'disable') payload.reason = 'operator_requested';
       if (operation === 'delete') payload.confirmation = true;
-      const result = await this.request(`/api/clients/${encodeURIComponent(id)}/${operation}`, payload);
+      const result = await this.request(`${this.basePath()}/${encodeURIComponent(id)}/${operation}`, payload);
       if (result?.schema_version !== 1) throw new Error('malformed_adapter_result');
       return result;
     }
@@ -795,13 +806,21 @@
       const result = await this.mutate('delete', id);
       return { schemaVersion: 1, id: result.id, deleted: result.deleted };
     }
-    async createClient(payload) { return this.request('/api/clients', payload); }
+    async createClient(payload) { return this.request(this.basePath(), payload); }
     async updateClient() { throw new Error('backend_stub'); }
-    async generateConfigurationPreview(id) { return this.request(`/api/clients/${encodeURIComponent(id)}/config`); }
+    async generateConfigurationPreview(id) { return this.request(`${this.basePath()}/${encodeURIComponent(id)}/config`); }
+    async getTemplate(profile) { return this.request(`/api/profiles/${profile}/template`); }
+    async updateTemplate(profile, template) { return this.request(`/api/profiles/${profile}/template`, { ...template, idempotencyKey: crypto.randomUUID() }); }
   }
 
   const shell = document.querySelector('.shell');
   const realCanary = shell?.dataset.runtime === 'real_canary';
+  const profileDetails = {
+    awg3: { interface: 'awg-canary0', client: 'AmneziaWG 3.1' },
+    awg2: { interface: 'awg-cita2', client: 'AmneziaWG 2.0 / WireSock' },
+    wg: { interface: 'awg-cita-wg', client: 'WireGuard' }
+  };
+  const currentProfile = () => profileDetails[state.selectedProfile];
   const testMode = !realCanary && shell?.dataset.testMode === 'true';
   const testAdapter = testMode ? window.__AWG_CITA_ADAPTER__ : null;
   const adapter = testAdapter || (realCanary ? new RealCanaryAdapter() : new MockLifecycleAdapter());
@@ -1483,16 +1502,17 @@
     $('preview-submit').disabled = wizard.submitting;
     if (realCanary) {
       const ru = state.locale === 'ru';
+      const profile = currentProfile();
       const labels = ru ? {
-        button: 'Создать клиента', title: 'Создание клиента · реальный peer', intro: 'Создание peer для AmneziaWG 3.1 на awg-canary0.',
+        button: 'Создать клиента', title: 'Создание клиента · реальный peer', intro: `Создание peer для ${profile.client} на ${profile.interface}.`,
         submit: 'Создать peer',
-        result: 'Клиент создан', status: 'Статус', warning: 'Конфигурация доступна в меню клиента. Для подключения используйте AmneziaWG 3.1.',
+        result: 'Клиент создан', status: 'Статус', warning: `Конфигурация доступна в меню клиента. Для подключения используйте ${profile.client}.`,
         config: 'Конфигурация · приватная', qr: 'QR с приватной конфигурацией для совместимых сканеров; совместимость не проверена',
         copy: 'Копировать', download: 'Скачать .conf · рекомендуется', boundary: 'Реальный peer создан · сохраните конфигурацию сейчас'
       } : {
-        button: 'Create client', title: 'Create client · real peer', intro: 'Creates an AmneziaWG 3.1 peer on awg-canary0.',
+        button: 'Create client', title: 'Create client · real peer', intro: `Creates a ${profile.client} peer on ${profile.interface}.`,
         submit: 'Create peer',
-        result: 'Client created', status: 'Status', warning: 'Configuration is available in the client menu. Connect with AmneziaWG 3.1.',
+        result: 'Client created', status: 'Status', warning: `Configuration is available in the client menu. Connect with ${profile.client}.`,
         config: 'Configuration · private', qr: 'QR containing private configuration for compatible scanners; compatibility unverified',
         copy: 'Copy', download: 'Download .conf · recommended', boundary: 'Real peer created · save configuration now'
       };
@@ -1646,7 +1666,7 @@
     $('delete-client-name').textContent = client.name;
     $('delete-confirm').disabled = deletion.submitting;
     if (realCanary) {
-      $('delete-dialog-copy').textContent = state.locale === 'ru' ? 'Peer будет безвозвратно удалён из конфигурации awg-canary0.' : 'The peer will be permanently removed from awg-canary0.';
+      $('delete-dialog-copy').textContent = state.locale === 'ru' ? `Peer будет безвозвратно удалён из конфигурации ${currentProfile().interface}.` : `The peer will be permanently removed from ${currentProfile().interface}.`;
       document.querySelector('[data-i18n="deleteBoundary"]').textContent = state.locale === 'ru' ? 'Удаление применяется на сервере после перезапуска.' : 'Deletion is applied on the server after restart.';
       $('delete-confirm').textContent = state.locale === 'ru' ? 'Удалить peer' : 'Delete peer';
     }
@@ -1810,7 +1830,7 @@
       state.clients = state.clients.map((client) => client.id === id ? updated : client);
       state.selectedClientId = id;
       state.dossierOpen = true;
-      recordAuditAction(action, updated.name, 'OK', realCanary ? 'Изменение применено на awg-canary0.' : nextStatus === 'ONLINE' ? 'Клиент включён в mock state.' : 'Клиент отключён в mock state.', realCanary ? 'Change applied on awg-canary0.' : nextStatus === 'ONLINE' ? 'Client enabled in mock state.' : 'Client disabled in mock state.');
+      recordAuditAction(action, updated.name, 'OK', realCanary ? `Изменение применено на ${currentProfile().interface}.` : nextStatus === 'ONLINE' ? 'Клиент включён в mock state.' : 'Клиент отключён в mock state.', realCanary ? `Change applied on ${currentProfile().interface}.` : nextStatus === 'ONLINE' ? 'Client enabled in mock state.' : 'Client disabled in mock state.');
       state.statusClient = { open: false, clientId: null, nextStatus: 'ONLINE', submitting: false };
       render();
       showToast(realCanary ? (state.locale === 'ru' ? 'Изменение peer сохранено на сервере' : 'Peer change saved on server') : t(nextStatus === 'ONLINE' ? 'clientEnabled' : 'clientDisabled'), 'success');
@@ -1853,7 +1873,7 @@
         state.selectedClientId = null;
         state.dossierOpen = false;
       }
-      recordAuditAction('CLIENT_DELETED', client?.name || id, 'OK', realCanary ? 'Peer удалён из awg-canary0.' : 'Client record удалён только из mock state.', realCanary ? 'Peer removed from awg-canary0.' : 'Client record deleted only from mock state.');
+      recordAuditAction('CLIENT_DELETED', client?.name || id, 'OK', realCanary ? `Peer удалён из ${currentProfile().interface}.` : 'Client record удалён только из mock state.', realCanary ? `Peer removed from ${currentProfile().interface}.` : 'Client record deleted only from mock state.');
       state.deleteClient = { open: false, clientId: null, submitting: false };
       render();
       showToast(realCanary ? (state.locale === 'ru' ? 'Peer удалён на сервере' : 'Peer deleted on server') : t('clientDeleted'), 'success');
@@ -1951,7 +1971,7 @@
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = realCanary ? `awg-cita-${result.clientId}.conf` : `awg-cita-mock-${result.clientId}.conf`;
+    link.download = realCanary ? `awg-cita-${state.selectedProfile}-${result.clientId}.conf` : `awg-cita-mock-${result.clientId}.conf`;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -2098,7 +2118,7 @@
     const url = URL.createObjectURL(new Blob([result.configText], { type: 'text/plain;charset=utf-8' }));
     const link = document.createElement('a');
     link.href = url;
-    link.download = `awg-cita-${result.client.id}.conf`;
+    link.download = `awg-cita-${state.selectedProfile}-${result.client.id}.conf`;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -2106,16 +2126,28 @@
   }
 
   function render() {
+    if (realCanary) {
+      realCanaryCopy.ru.clientsSubtitle = `Поиск, фильтры и карточки по данным ${currentProfile().interface}.`;
+      realCanaryCopy.en.clientsSubtitle = `Search, filters, and client details from ${currentProfile().interface}.`;
+      realCanaryCopy.ru.previewResultCopy = `Результат получен от ${currentProfile().interface}.`;
+      realCanaryCopy.en.previewResultCopy = `Result received from ${currentProfile().interface}.`;
+    }
     applyTranslations();
     if (realCanary) {
       const ru = state.locale === 'ru';
       document.querySelector('.rail-status strong').textContent = 'AWG-CITA / CANARY';
       document.querySelector('.rail-status small').textContent = ru ? 'Реальные действия с peer' : 'Real peer actions';
-      $('mutation-boundary').textContent = ru ? 'Create / Disable / Enable / Delete применяются к awg-canary0. Конфигурация и QR доступны в меню клиента.' : 'Create / Disable / Enable / Delete apply to awg-canary0. Configuration and QR are available in the client menu.';
+      const interfaceName = currentProfile().interface;
+      $('mutation-boundary').textContent = ru ? `Create / Disable / Enable / Delete применяются к ${interfaceName}. Конфигурация и QR доступны в меню клиента.` : `Create / Disable / Enable / Delete apply to ${interfaceName}. Configuration and QR are available in the client menu.`;
       document.querySelector('[data-i18n="trafficDescription"]').textContent = ru ? 'RX + TX по AWG read-back' : 'RX + TX from AWG read-back';
-      document.querySelector('[data-i18n="deleteEyebrow"]').textContent = 'DESTRUCTIVE ACTION / AWG CANARY';
+      document.querySelector('[data-i18n="deleteEyebrow"]').textContent = `DESTRUCTIVE ACTION / ${interfaceName.toUpperCase()}`;
     }
     renderNavigation();
+    document.querySelectorAll('[data-client-profile]').forEach((button) => {
+      const active = button.dataset.clientProfile === state.selectedProfile;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
     renderConnection();
     renderOverview();
     const visibleClients = getVisibleClients();
@@ -2134,18 +2166,88 @@
 
   function viewFromLocation() {
     const view = window.location.hash.slice(1).split('?')[0];
-    return ['clients', 'journal'].includes(view) ? view : 'overview';
+    return ['clients', 'journal', 'settings'].includes(view) ? view : 'overview';
   }
 
   function navigate(view, { fromHistory = false } = {}) {
-    const nextView = ['clients', 'journal'].includes(view) ? view : 'overview';
+    const nextView = ['clients', 'journal', 'settings'].includes(view) ? view : 'overview';
     if (!fromHistory && window.location.hash !== `#${nextView}`) window.history.pushState({}, '', `#${nextView}`);
     state.currentView = nextView;
     if (nextView === 'clients') state.hasVisitedClients = true;
     render();
+    if (nextView === 'settings') loadTemplates();
+  }
+
+  function setTemplateForm(profile, template) {
+    const form = document.querySelector(`[data-template-profile="${profile}"]`);
+    if (!form) return;
+    for (const field of ['dns_server', 'allowed_ips', 'mtu', 'keepalive']) {
+      form.elements.namedItem(field).value = String(template[field]);
+    }
+    form.dataset.loaded = 'true';
+  }
+
+  async function loadTemplates() {
+    for (const profile of ['awg3', 'awg2', 'wg']) {
+      const form = document.querySelector(`[data-template-profile="${profile}"]`);
+      if (!realCanary) {
+        form.querySelector('button[type="submit"]').disabled = true;
+        continue;
+      }
+      try {
+        const result = await adapter.getTemplate(profile);
+        if (result?.schema_version !== 1 || result.profile !== profile) throw new Error('invalid_template');
+        setTemplateForm(profile, result.template);
+        form.querySelector('button[type="submit"]').disabled = false;
+        document.querySelector(`[data-template-status="${profile}"]`).textContent = '';
+      } catch (_error) {
+        document.querySelector(`[data-template-status="${profile}"]`).textContent = state.locale === 'ru' ? 'Не удалось загрузить' : 'Load failed';
+        form.querySelector('button[type="submit"]').disabled = true;
+      }
+    }
+  }
+
+  async function saveTemplate(form) {
+    const profile = form.dataset.templateProfile;
+    if (!realCanary || !['awg3', 'awg2', 'wg'].includes(profile) || form.dataset.loaded !== 'true') return;
+    const button = form.querySelector('button[type="submit"]');
+    const status = document.querySelector(`[data-template-status="${profile}"]`);
+    const template = {
+      dns_server: form.elements.namedItem('dns_server').value.trim(),
+      allowed_ips: form.elements.namedItem('allowed_ips').value.trim(),
+      mtu: Number(form.elements.namedItem('mtu').value),
+      keepalive: Number(form.elements.namedItem('keepalive').value)
+    };
+    button.disabled = true;
+    status.textContent = state.locale === 'ru' ? 'Сохраняю…' : 'Saving…';
+    try {
+      const result = await adapter.updateTemplate(profile, template);
+      if (result?.schema_version !== 1 || result.profile !== profile) throw new Error('invalid_template');
+      setTemplateForm(profile, result.template);
+      status.textContent = state.locale === 'ru' ? 'Сохранено для новых клиентов' : 'Saved for new clients';
+    } catch (_error) {
+      status.textContent = state.locale === 'ru' ? 'Ошибка сохранения' : 'Save failed';
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function switchProfile(profile) {
+    if (!realCanary || !['awg3', 'awg2', 'wg'].includes(profile) || profile === state.selectedProfile) return;
+    if (activeDialog() || state.loading || state.refreshing || state.createPreview.submitting ||
+        state.statusClient.submitting || state.deleteClient.submitting) return;
+    state.selectedProfile = profile;
+    adapter.profile = profile;
+    state.selectedClientId = null;
+    state.clients = [];
+    state.actionMenu = { open: false, clientId: null };
+    state.searchQuery = '';
+    state.statusFilters.clear();
+    loadClients();
   }
 
   async function loadClients() {
+    const requestedProfile = state.selectedProfile;
     state.loading = true;
     state.error = '';
     render();
@@ -2154,6 +2256,7 @@
         adapter.listClients(),
         typeof adapter.listObservability === 'function' ? adapter.listObservability() : clone(observabilityFixtures)
       ]);
+      if (requestedProfile !== state.selectedProfile) return;
       state.clients = normalizeClients(clientResult);
       const observability = normalizeObservability(observabilityResult);
       state.observabilitySchemaVersion = observability.schemaVersion;
@@ -2165,24 +2268,30 @@
       state.lastRefresh = new Date().toISOString();
       addActivity(t(realCanary ? 'refreshed' : 'loadedFixtures'), `${state.clients.length} ${t('records')}`);
     } catch (_error) {
+      if (requestedProfile !== state.selectedProfile) return;
       state.error = t('malformedResult');
       state.clients = [];
       state.statusHistory = [];
       state.auditEvents = [];
       state.alerts = [];
     } finally {
-      state.loading = false;
-      render();
+      if (requestedProfile === state.selectedProfile) {
+        state.loading = false;
+        render();
+      }
     }
   }
 
   async function refreshStatus() {
     if (state.refreshing) return;
+    const requestedProfile = state.selectedProfile;
     state.refreshing = true;
     state.error = '';
     render();
     try {
-      state.clients = normalizeClients(await adapter.refreshStatus());
+      const refreshed = normalizeClients(await adapter.refreshStatus());
+      if (requestedProfile !== state.selectedProfile) return;
+      state.clients = refreshed;
       const now = new Date().toISOString();
       const onlineCount = state.clients.filter((client) => client.status === 'ONLINE').length;
       const attentionCount = state.clients.filter((client) => ['STALE', 'NEVER', 'DISABLED'].includes(client.status) || client.warning).length;
@@ -2193,6 +2302,7 @@
       addActivity(t('refreshed'), `${state.clients.length} ${t('records')}`);
       showToast(t('refreshSuccess'), 'success');
     } catch (_error) {
+      if (requestedProfile !== state.selectedProfile) return;
       state.refreshFailures += 1;
       const now = new Date().toISOString();
       state.auditEvents = [{ id: `event-runtime-error-${Date.now()}`, timestamp: now, actor: 'SYSTEM', action: 'STATUS_REFRESH_FAILED', target: 'AWG node', result: 'ERROR', correlationId: `corr-runtime-error-${Date.now()}`, reasonRu: realCanary ? 'AWG read-back вернул ошибку.' : 'Mock adapter вернул ошибку обновления.', reasonEn: realCanary ? 'AWG read-back failed.' : 'The mock adapter returned a refresh error.' }, ...state.auditEvents].slice(0, 120);
@@ -2236,6 +2346,8 @@
   }
 
   document.addEventListener('click', (event) => {
+    const profileButton = event.target.closest('[data-client-profile]');
+    if (profileButton) { switchProfile(profileButton.dataset.clientProfile); return; }
     const viewButton = event.target.closest('[data-view]');
     if (viewButton) {
       navigate(viewButton.dataset.view);
@@ -2401,6 +2513,13 @@
     }
   });
 
+  document.addEventListener('submit', (event) => {
+    const form = event.target.closest('[data-template-profile]');
+    if (!form) return;
+    event.preventDefault();
+    saveTemplate(form);
+  });
+
   document.addEventListener('input', (event) => {
     if (event.target.matches('#client-search')) {
       state.searchQuery = event.target.value;
@@ -2536,4 +2655,5 @@
   state.currentView = viewFromLocation();
   render();
   loadClients();
+  if (state.currentView === 'settings') loadTemplates();
 })();

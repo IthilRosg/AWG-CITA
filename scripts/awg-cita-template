@@ -1,0 +1,6 @@
+#!/usr/bin/python3 -I
+"""Fixed root-owned client template entrypoint."""
+import sys
+sys.path.insert(0, '/opt/awg-cita/current/site')
+from awg_cita.client_templates import main
+raise SystemExit(main())

@@ -78,10 +78,13 @@ def main(argv: list[str] | None = None) -> int:
         if not arguments.canary_actions and (arguments.operator_id or arguments.action_audit_log):
             parser.error('--operator-id and --action-audit-log require --canary-actions')
         service = LifecycleService(RealAwgLifecycleAdapter()) if arguments.canary_actions else None
+        profile_services = ({'awg2': LifecycleService(RealAwgLifecycleAdapter(profile='awg2')),
+                             'wg': LifecycleService(RealAwgLifecycleAdapter(profile='wg'))}
+                            if arguments.canary_actions else None)
         origin = arguments.operator_origin if arguments.canary_actions else None
         if service is not None:
             action_audit_log = ActionAuditLog.open(arguments.action_audit_log)
-        canary_options = {'lifecycle_service': service, 'operator_origin': origin,
+        canary_options = {'lifecycle_service': service, 'profile_services': profile_services, 'operator_origin': origin,
                           'operator_id': arguments.operator_id, 'action_audit_log': action_audit_log,
                           'unix_socket_path': CANARY_SOCKET_PATH} if service is not None else {}
         bind_options = {} if service is not None else {'host': arguments.bind, 'port': arguments.port}
