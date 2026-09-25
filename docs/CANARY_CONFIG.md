@@ -44,6 +44,13 @@ service only supplementary membership in `awg-cita-relay`. The socket is mode
 0660. Do not grant the relay process the Caddy service group: that group can
 read the proxy configuration on installations where it owns the Caddyfile.
 
+Install each candidate under a root-owned, service-readable versioned release
+directory. The root helper imports from `/opt/awg-cita/current/site`; the
+application and relay units must use the same `current` release. Switch the
+root-owned `current` symlink only during the reviewed service change, and keep
+the previous release intact for rollback. No service account may write the
+link, a release directory, or any Python module loaded by the root helper.
+
 In the Caddy `reverse_proxy` block reached only after `basic_auth`, add:
 
 ```caddyfile

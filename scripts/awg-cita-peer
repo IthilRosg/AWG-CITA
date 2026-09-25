@@ -1,6 +1,6 @@
 #!/usr/bin/python3 -I
 """Root-owned, fixed canary peer entrypoint."""
 import sys
-sys.path.insert(0, '/opt/awg-cita/site')
+sys.path.insert(0, '/opt/awg-cita/current/site')
 from awg_cita.canary_helper import main
 raise SystemExit(main())

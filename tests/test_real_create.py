@@ -42,6 +42,8 @@ class RelayCreateTests(unittest.TestCase):
         self.assertIn('/usr/local/sbin/awg-cita-peer create', rule)
         self.assertNotIn('/usr/local/sbin/awg-cita-peer create *', rule)
         self.assertNotIn('NOPASSWD: ALL', rule)
+        wrapper = Path('scripts/awg-cita-peer').read_text(encoding='ascii')
+        self.assertIn("/opt/awg-cita/current/site", wrapper)
 
     @unittest.skipUnless(__import__('os').name == 'posix', 'Unix relay requires POSIX Python')
     def test_fixed_create_route_is_forwarded_only_with_trusted_headers(self):
