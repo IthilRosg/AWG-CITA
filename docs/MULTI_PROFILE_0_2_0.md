@@ -22,6 +22,13 @@ text stay folded until requested. The existing-client configuration dialog
 offers QR, text, and the constrained settings editor. Saved configuration is
 private and is never included in status, history, or action audit records.
 
+The Settings view also shows an authenticated, read-only server summary for
+each profile: interface, endpoint, interface address, listen port, active state,
+and managed client count. The fixed root helpers verify profile and runtime
+port before returning this projection. They never return private/public keys,
+raw AWG dumps, or obfuscation values. Changes to server ports, addresses, and
+obfuscation need a separate apply-and-rollback workflow.
+
 ## Isolation and installation
 
 `awg-cita2` and `awg-cita-wg` are independent interfaces and systemd services.

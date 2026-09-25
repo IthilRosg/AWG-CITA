@@ -23,9 +23,9 @@
       navOverview: 'Обзор',
       navClients: 'Клиенты',
       navJournal: 'Журнал',
-      navSettings: 'Профили',
-      settingsHeading: 'Профили подключения',
-      settingsSubtitle: 'Параметры применяются только к новым конфигурациям клиентов.',
+      navSettings: 'Настройки',
+      settingsHeading: 'Настройки',
+      settingsSubtitle: 'Состояние серверных интерфейсов и шаблоны новых конфигураций.',
       saveTemplate: 'Сохранить',
       mockBoundary: 'UI READY / BACKEND STUB',
       railBoundary: 'Мутации отключены',
@@ -248,9 +248,9 @@
       navOverview: 'Overview',
       navClients: 'Clients',
       navJournal: 'Journal',
-      navSettings: 'Profiles',
-      settingsHeading: 'Connection profiles',
-      settingsSubtitle: 'These values apply only to new client configurations.',
+      navSettings: 'Settings',
+      settingsHeading: 'Settings',
+      settingsSubtitle: 'Server interface state and templates for new configurations.',
       saveTemplate: 'Save',
       mockBoundary: 'UI READY / BACKEND STUB',
       railBoundary: 'Mutations disabled',
@@ -814,6 +814,7 @@
         { ...settings, expectedRevision, idempotencyKey: crypto.randomUUID() });
     }
     async getTemplate(profile) { return this.request(`/api/profiles/${profile}/template`); }
+    async getServerSettings(profile) { return this.request(`/api/profiles/${profile}/server`); }
     async updateTemplate(profile, template) { return this.request(`/api/profiles/${profile}/template`, { ...template, idempotencyKey: crypto.randomUUID() }); }
   }
 
@@ -2238,7 +2239,7 @@
     state.currentView = nextView;
     if (nextView === 'clients') state.hasVisitedClients = true;
     render();
-    if (nextView === 'settings') loadTemplates();
+    if (nextView === 'settings') { loadTemplates(); loadServerSettings(); }
   }
 
   function setTemplateForm(profile, template) {
@@ -2267,6 +2268,35 @@
         document.querySelector(`[data-template-status="${profile}"]`).textContent = state.locale === 'ru' ? 'Не удалось загрузить' : 'Load failed';
         form.querySelector('button[type="submit"]').disabled = true;
       }
+    }
+  }
+
+  async function loadServerSettings() {
+    const ru = state.locale === 'ru';
+    $('server-settings-title').textContent = ru ? 'Интерфейсы сервера' : 'Server interfaces';
+    $('server-settings-note').textContent = ru ? 'Рабочие параметры. Изменение порта, адреса или обфускации требует отдельного применения.' : 'Live parameters. Changing ports, addresses, or obfuscation requires a separate apply workflow.';
+    $('client-defaults-title').textContent = ru ? 'Шаблоны конфигов' : 'Client config templates';
+    for (const profile of ['awg3', 'awg2', 'wg']) {
+      const content = document.querySelector(`[data-server-profile="${profile}"] .server-settings-content`);
+      if (!realCanary) { content.textContent = ru ? 'Доступно только на сервере' : 'Available on server only'; continue; }
+      try {
+        const value = await adapter.getServerSettings(profile);
+        if (value?.schema_version !== 1 || value.profile !== profile || value.state !== 'ACTIVE') throw new Error('invalid_server_settings');
+        content.replaceChildren();
+        const rows = [
+          [ru ? 'Состояние' : 'State', ru ? 'Работает' : 'Active'],
+          [ru ? 'Интерфейс' : 'Interface', value.interface],
+          ['Endpoint', `${value.endpoint}:${value.listenPort}`],
+          [ru ? 'Адрес' : 'Address', value.address],
+          [ru ? 'Клиентов' : 'Clients', String(value.clientCount)]
+        ];
+        for (const [label, data] of rows) {
+          const row = document.createElement('div'); row.className = 'server-settings-row';
+          const caption = document.createElement('span'); caption.textContent = label;
+          const item = document.createElement('b'); item.textContent = data;
+          row.append(caption, item); content.append(row);
+        }
+      } catch (_error) { content.textContent = ru ? 'Не удалось получить состояние' : 'Status unavailable'; }
     }
   }
 
@@ -2723,5 +2753,5 @@
   state.currentView = viewFromLocation();
   render();
   loadClients();
-  if (state.currentView === 'settings') loadTemplates();
+  if (state.currentView === 'settings') { loadTemplates(); loadServerSettings(); }
 })();

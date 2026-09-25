@@ -47,6 +47,14 @@ async function main() {
       await route.fulfill({ status: 200, contentType: 'application/json',
         body: JSON.stringify({ schema_version: 1, profile, template }) });
     });
+    await page.route('**/api/profiles/*/server', async (route) => {
+      const profile = route.request().url().split('/').at(-2);
+      const interfaces = { awg3: 'awg-canary0', awg2: 'awg-cita2', wg: 'awg-cita-wg' };
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        schema_version: 1, profile, interface: interfaces[profile], endpoint: '127.0.0.1',
+        address: '127.0.0.2/24', listenPort: 47193, state: 'ACTIVE', clientCount: 2
+      }) });
+    });
     await page.goto(`${url}#clients`);
     await page.waitForFunction(() => document.querySelector('#app')?.getAttribute('aria-busy') === 'false');
     await page.locator('[data-client-profile="awg2"]').click();
@@ -63,6 +71,7 @@ async function main() {
     await page.locator('#preview-close').click();
     if (!calls.some((value) => value.endsWith('/awg2/clients')) || !calls.some((value) => value.endsWith('/wg/clients'))) throw new Error('profile list routes missing');
     await page.locator('[data-view="settings"]').click();
+    await page.waitForFunction(() => document.querySelector('[data-server-profile="awg2"] .server-settings-content')?.textContent.includes('awg-cita2'));
     const form = page.locator('[data-template-profile="wg"]');
     await page.waitForFunction(() => document.querySelector('[data-template-profile="wg"]')?.dataset.loaded === 'true');
     await form.locator('[name="allowed_ips"]').fill('127.0.0.0/8');

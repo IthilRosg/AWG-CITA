@@ -261,6 +261,14 @@ class ProfileOps:
             controller = self.controller()
             if operation == 'list':
                 return {'schema_version': 1, 'clients': controller.list_clients()}
+            if operation == 'server':
+                endpoint, _dns, address, port, _obf = self.settings()
+                runtime = self.read_dump().splitlines()[0].split('\t')
+                if len(runtime) < 3 or runtime[2] != str(port):
+                    raise ValueError('profile runtime drift')
+                return {'schema_version': 1, 'profile': self.name, 'interface': self.interface,
+                        'endpoint': endpoint, 'address': address, 'listenPort': port,
+                        'state': 'ACTIVE', 'clientCount': len(controller.list_clients())}
             if operation == 'create':
                 return controller.create(request['name'], request['tags'], request['idempotencyKey'],
                                          lambda: (private := self.key(('genkey',)), self.key(('pubkey',), private)),
@@ -280,7 +288,7 @@ class ProfileOps:
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     if (os.geteuid() != 0 or len(args) not in (2, 3) or args[0] not in _INTERFACES or
-        not ((len(args) == 2 and args[1] in {'list', 'create'}) or
+        not ((len(args) == 2 and args[1] in {'list', 'server', 'create'}) or
              (len(args) == 3 and args[1] in {'config', 'config-update', 'enable', 'disable', 'delete'} and _ID.fullmatch(args[2])))):
         print('invalid profile operation', file=sys.stderr)
         return 64

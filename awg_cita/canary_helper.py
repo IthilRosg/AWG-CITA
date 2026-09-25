@@ -351,7 +351,7 @@ def _read_create_request() -> dict[str, object]:
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    if os.geteuid() != 0 or not ((len(args) == 1 and args[0] == 'list') or
+    if os.geteuid() != 0 or not ((len(args) == 1 and args[0] in {'list', 'server'}) or
                                   (len(args) == 2 and args[0] in {'disable', 'enable', 'delete', 'config', 'config-update'} and _ID.fullmatch(args[1])) or
                                   (len(args) == 1 and args[0] == 'create')):
         print('invalid canary operation', file=sys.stderr)
@@ -366,6 +366,14 @@ def main(argv: list[str] | None = None) -> int:
             controller = _controller()
             if args[0] == 'list':
                 result = {'schema_version': 1, 'clients': controller.list_clients()}
+            elif args[0] == 'server':
+                _key, _route, endpoint, _dns, _obf, address, port = _protected_peer_profile()
+                runtime = _read_dump().splitlines()[0].split('\t')
+                if len(runtime) < 3 or runtime[2] != str(port):
+                    raise ValueError('canary runtime drift')
+                result = {'schema_version': 1, 'profile': 'awg3', 'interface': 'awg-canary0',
+                          'endpoint': endpoint, 'address': address, 'listenPort': port,
+                          'state': 'ACTIVE', 'clientCount': len(controller.list_clients())}
             elif args[0] == 'create':
                 result = controller.create(request['name'], request['tags'], request['idempotencyKey'],
                                            _keypair, _server_public, _store_client_config,

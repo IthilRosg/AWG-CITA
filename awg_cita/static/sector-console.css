@@ -1018,6 +1018,13 @@ td.mono { color: var(--dim); font-size: 10px; }
 .profile-settings-card input { width: 100%; min-height: 38px; padding: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font: inherit; }
 .profile-settings-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; font-size: 11px; }
 .profile-settings-actions span { min-height: 1em; }
+.server-settings-heading { margin: 28px 0 12px; }
+.server-settings-card { padding: 18px; }
+.server-settings-card > strong { font-size: 16px; }
+.server-settings-content { display: grid; gap: 8px; margin-top: 16px; font-size: 12px; }
+.server-settings-row { display: flex; justify-content: space-between; gap: 14px; border-top: 1px solid var(--line-soft); padding-top: 8px; }
+.server-settings-row span { color: var(--dim); }
+.server-settings-row b { font: 11px var(--mono); overflow-wrap: anywhere; text-align: right; }
 @media (max-width: 1100px) { .profile-settings-grid { grid-template-columns: 1fr; } }
 
 @media (max-width: 820px) {

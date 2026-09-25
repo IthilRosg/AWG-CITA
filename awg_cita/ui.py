@@ -35,7 +35,7 @@ INDEX_HTML = """<!doctype html>
         </button>
         <button class="nav-item" type="button" data-view="settings" aria-current="false">
           <span class="nav-index">04</span>
-          <span data-i18n="navSettings">Профили</span>
+          <span data-i18n="navSettings">Настройки</span>
         </button>
       </nav>
       <div class="rail-status">
@@ -448,9 +448,23 @@ INDEX_HTML = """<!doctype html>
 
       <section id="settings-view" class="view" data-view-panel="settings" aria-labelledby="settings-heading" hidden>
         <div class="section-heading"><div>
-          <div class="eyebrow">04 / CONNECTION PROFILES</div>
-          <h2 id="settings-heading" data-i18n="settingsHeading">Профили подключения</h2>
+          <div class="eyebrow">04 / SETTINGS</div>
+          <h2 id="settings-heading" data-i18n="settingsHeading">Настройки</h2>
           <p class="section-subtitle" data-i18n="settingsSubtitle">Параметры ниже применяются только к новым конфигурациям клиентов.</p>
+        </div></div>
+        <div class="section-heading server-settings-heading"><div>
+          <div class="eyebrow">SERVER / LIVE STATE</div>
+          <h3 id="server-settings-title">Интерфейсы сервера</h3>
+          <p id="server-settings-note" class="section-subtitle">Рабочие параметры. Изменение порта, адреса или обфускации требует отдельного применения.</p>
+        </div></div>
+        <div class="profile-settings-grid server-settings-grid">
+          <div class="panel server-settings-card" data-server-profile="awg3"><strong>AWG 3.1</strong><div class="server-settings-content" role="status">Загрузка…</div></div>
+          <div class="panel server-settings-card" data-server-profile="awg2"><strong>AWG 2.0</strong><div class="server-settings-content" role="status">Загрузка…</div></div>
+          <div class="panel server-settings-card" data-server-profile="wg"><strong>WireGuard</strong><div class="server-settings-content" role="status">Загрузка…</div></div>
+        </div>
+        <div class="section-heading server-settings-heading"><div>
+          <div class="eyebrow">CLIENT / DEFAULTS</div>
+          <h3 id="client-defaults-title">Шаблоны конфигов</h3>
         </div></div>
         <div class="profile-settings-grid">
           <form class="panel profile-settings-card" data-template-profile="awg3">
