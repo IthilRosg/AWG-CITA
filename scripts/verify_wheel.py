@@ -24,11 +24,12 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="awg-cita-wheel-") as temporary:
         work = Path(temporary)
         dist = work / "dist"
-        subprocess.run([sys.executable, "-m", "pip", "wheel", ".", "--no-deps", "--wheel-dir", str(dist)], cwd=ROOT, check=True)
+        subprocess.run([sys.executable, "-m", "pip", "wheel", ".", "--wheel-dir", str(dist)], cwd=ROOT, check=True)
         wheel = next(dist.glob("awg_cita-*.whl"))
         with zipfile.ZipFile(wheel) as archive:
             names = set(archive.namelist())
-        required = {"awg_cita/static/sector-console.css", "awg_cita/static/sector-console.js"}
+        required = {"awg_cita/static/sector-console.css", "awg_cita/static/sector-console.js",
+                    "awg_cita/static/sector-console.svg"}
         if not required <= names:
             raise RuntimeError("wheel is missing static assets")
         environment = work / "venv"

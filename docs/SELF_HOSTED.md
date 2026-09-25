@@ -1,8 +1,10 @@
 # Self-hosted deployment guide
 
-AWG CITA is a **read-only, loopback-only** application. This guide describes a
-portable deployment boundary; it is not a production-change instruction for any
-particular host.
+This guide covers AWG CITA's **read-only, loopback-only mode**. The optional
+canary action mode has a separate private Unix ingress and requires the
+[canary configuration contract](CANARY_CONFIG.md) and
+[HTTP security contract](CANARY_HTTP_CONTRACT.md). This guide is not a
+production-change instruction for any particular host.
 
 ## 1. Keep the privilege boundary narrow
 
@@ -21,8 +23,8 @@ Before starting it:
 - keep proxy credentials, TLS private keys and Basic-Auth hashes outside this
   package and outside its logs.
 
-AWG CITA does not ship a privileged helper because its safe installation is
-host-specific. Audit and deploy such a helper separately.
+The read-only mode does not require the privileged action helper. Audit and
+deploy any host-specific read helper separately.
 
 ## 2. Install and start on loopback
 

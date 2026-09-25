@@ -5,9 +5,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "awg-cita"
 version = "0.1.0a4"
-description = "Security-first, read-only operator console primitives for AmneziaWG"
+description = "Security-first operator console primitives for AmneziaWG"
 readme = "README.md"
 requires-python = ">=3.11"
+dependencies = ["segno==1.6.6"]
 license = {text = "Apache-2.0"}
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
@@ -24,4 +25,4 @@ awg-cita = "awg_cita.cli:main"
 packages = ["awg_cita"]
 
 [tool.setuptools.package-data]
-awg_cita = ["static/*.css", "static/*.js"]
+awg_cita = ["static/*.css", "static/*.js", "static/*.svg"]

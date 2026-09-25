@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TEXT_SUFFIXES = {"", ".css", ".md", ".py", ".js", ".json", ".toml", ".yml", ".yaml"}
+TEXT_SUFFIXES = {"", ".css", ".md", ".py", ".js", ".json", ".svg", ".toml", ".yml", ".yaml", ".sudoers"}
 FORBIDDEN_NAMES = {".env", ".env.local", ".env.production"}
 FORBIDDEN_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".crt", ".cer"}
 PATTERNS = {
@@ -61,7 +61,7 @@ def public_ip_literals(text: str) -> list[str]:
             address = ipaddress.ip_address(candidate)
         except ValueError:
             continue
-        if not address.is_loopback:
+        if not address.is_loopback and not address.is_unspecified:
             found.append(candidate)
     return found
 
