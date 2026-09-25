@@ -31,7 +31,7 @@ CLIENT_FIELDS = (
 
 ClientStatus = Literal["ONLINE", "IDLE", "STALE", "NEVER", "DISABLED"]
 LifecycleOperation = Literal[
-    "updateClient", "enableClient", "disableClient", "deleteClient", "generateConfigurationPreview"
+    "updateClient", "enableClient", "disableClient", "deleteClient", "generateConfigurationPreview", "updateConfiguration"
 ]
 LifecycleErrorCode = Literal[
     "invalid_request", "client_not_found", "invalid_state", "conflict", "internal_error",
@@ -409,15 +409,47 @@ class LifecycleService:
                     not 1 <= len(value['configText']) <= 2400 or
                     not isinstance(value['qrDataUri'], str) or
                     not value['qrDataUri'].startswith('data:image/png;base64,') or
-                    len(value['qrDataUri']) > 65536):
+                    len(value['qrDataUri']) > 65536 or
+                    not isinstance(value.get('revision'), str) or
+                    not re.fullmatch(r'[0-9a-f]{64}', value['revision'])):
                 raise LifecycleError('configuration_failed')
             self._record_audit('getConfiguration', client_id, 'OK')
             return {'schema_version': 1, 'client': client,
-                    'configText': value['configText'], 'qrDataUri': value['qrDataUri']}
+                    'configText': value['configText'], 'qrDataUri': value['qrDataUri'],
+                    'revision': value['revision']}
         except LifecycleError:
             raise
         except Exception:
             raise LifecycleError('configuration_failed') from None
+
+    def update_configuration(self, client_id: str, expected_revision: str,
+                             settings: dict[str, object], idempotency_key: str) -> dict[str, Any]:
+        from .client_config_edit import validate_revision
+        from .client_templates import validate
+        self._validate_client_id(client_id)
+        if not isinstance(idempotency_key, str) or not _IDEMPOTENCY_RE.fullmatch(idempotency_key):
+            raise LifecycleError('invalid_request')
+        try:
+            validate_revision(expected_revision)
+            settings = validate(settings)
+        except (ValueError, TypeError) as error:
+            raise LifecycleError('invalid_request') from error
+        if not self._mutation_lock.acquire(timeout=2.0):
+            raise LifecycleError('conflict')
+        try:
+            self.adapter.update_configuration(client_id, expected_revision, settings)
+            # Read back from the protected store. Never cache private config in idempotency or audit state.
+            result = self.get_configuration(client_id)
+            self._record_audit('updateConfiguration', client_id, 'OK')
+            return result
+        except LifecycleError:
+            self._record_audit('updateConfiguration', client_id, 'ERROR', 'configuration_failed')
+            raise
+        except Exception:
+            self._record_audit('updateConfiguration', client_id, 'ERROR', 'configuration_failed')
+            raise LifecycleError('configuration_failed') from None
+        finally:
+            self._mutation_lock.release()
 
     def audit_events(self) -> list[AuditEvent]:
         with self._audit_lock:

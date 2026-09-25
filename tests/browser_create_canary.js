@@ -8,7 +8,10 @@ fs.mkdirSync(artifacts, { recursive: true });
 const assert = require('node:assert/strict');
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const peerId = 'peer-abcdef0123456789';
-const config = '[Interface]\nPrivateKey = SYNTHETIC-TEST-ONLY\nAddress = 127.0.0.2/32\n';
+const config = '[Interface]\nPrivateKey = SYNTHETIC-TEST-ONLY\nAddress = 127.0.0.2/32\nDNS = 127.0.0.1\nMTU = 1420\n\n[Peer]\nPublicKey = SYNTHETIC-SERVER-ONLY\nAllowedIPs = 0.0.0.0/0\nPersistentKeepalive = 25\n';
+const editedConfig = config.replace('MTU = 1420', 'MTU = 1280');
+let savedConfig = config;
+let revision = 'a'.repeat(64);
 // Valid 1x1 PNG, entirely synthetic; do not capture the result in screenshots.
 const qr = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC';
 const client = { id: peerId, name: 'Synthetic Canary', status: 'NEVER', lastHandshakeAt: null, lastSeenAt: null, createdAt: null, expiration: '', rxBytes: 0, txBytes: 0, notes: '', tags: ['field'], warning: '' };
@@ -66,8 +69,16 @@ async function main() {
       }
     });
     await page.route(`**/api/clients/${peerId}/config`, async route => {
+      if (route.request().method() === 'POST') {
+        const body = route.request().postDataJSON();
+        assert.equal(body.mtu, 1280);
+        assert.equal(body.expectedRevision, revision);
+        assert.match(body.idempotencyKey, /^[0-9a-f-]{36}$/i);
+        savedConfig = editedConfig;
+        revision = 'b'.repeat(64);
+      }
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
-        schema_version: 1, client, configText: config, qrDataUri: qr
+        schema_version: 1, client, configText: savedConfig, qrDataUri: qr, revision
       }) });
     });
     await page.goto(`${url}#clients`);
@@ -89,7 +100,8 @@ async function main() {
     assert.equal(await page.locator('#create-qr').getAttribute('role'), 'img');
     assert.equal(await page.locator('#create-qr-caption').count(), 1, 'QR compatibility caption missing');
     assert.match(await page.locator('#create-qr-caption').textContent(), /совместим|compatible/i);
-    assert.match(await page.locator('#create-one-time-warning').textContent(), /меню клиента|client menu/i);
+    assert.equal(await page.locator('.config-disclosure[open]').count(), 0, 'private payload shown by default');
+    await page.screenshot({ path: `${artifacts}/created-compact.png` });
     const downloadPromise = page.waitForEvent('download');
     await page.locator('#create-config-download').click();
     const download = await downloadPromise;
@@ -106,9 +118,15 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('#config-preview-text')?.textContent.includes('SYNTHETIC-TEST-ONLY'));
     assert.equal(await page.locator('#config-preview-download').isDisabled(), false);
     assert.equal(await page.locator('#config-preview-qr img').count(), 1);
+    await page.locator('#config-preview-tab-edit').click();
+    await page.screenshot({ path: `${artifacts}/config-edit.png` });
+    await page.locator('#config-edit-form [name="mtu"]').fill('1280');
+    await page.locator('#config-edit-save').click();
+    await page.waitForFunction(() => document.querySelector('#config-edit-status')?.textContent.includes('Сохранено'));
+    assert.equal(await page.locator('#config-preview-text').textContent(), editedConfig);
     const repeatedDownload = page.waitForEvent('download');
     await page.locator('#config-preview-download').click();
-    assert.equal(await (await require('node:fs/promises').readFile(await (await repeatedDownload).path(), 'utf8')), config);
+    assert.equal(await (await require('node:fs/promises').readFile(await (await repeatedDownload).path(), 'utf8')), editedConfig);
     await page.locator('#config-preview-close').click();
     assert(gets >= 2, 'no list read-back after create');
     const leakage = await page.evaluate(() => [document.documentElement.outerHTML, JSON.stringify(localStorage), JSON.stringify(sessionStorage)].join('\n'));

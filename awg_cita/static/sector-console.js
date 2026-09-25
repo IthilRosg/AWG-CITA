@@ -809,6 +809,10 @@
     async createClient(payload) { return this.request(this.basePath(), payload); }
     async updateClient() { throw new Error('backend_stub'); }
     async generateConfigurationPreview(id) { return this.request(`${this.basePath()}/${encodeURIComponent(id)}/config`); }
+    async updateConfiguration(id, expectedRevision, settings) {
+      return this.request(`${this.basePath()}/${encodeURIComponent(id)}/config`,
+        { ...settings, expectedRevision, idempotencyKey: crypto.randomUUID() });
+    }
     async getTemplate(profile) { return this.request(`/api/profiles/${profile}/template`); }
     async updateTemplate(profile, template) { return this.request(`/api/profiles/${profile}/template`, { ...template, idempotencyKey: crypto.randomUUID() }); }
   }
@@ -1519,15 +1523,18 @@
       $('add-client-button').textContent = labels.button;
       $('preview-dialog-title').textContent = labels.title;
       $('preview-dialog-copy').textContent = labels.intro;
+      document.querySelector('#create-preview-modal .eyebrow').textContent = `CLIENT / ${state.selectedProfile.toUpperCase()}`;
+      document.querySelector('#preview-step-result .preview-step-label').textContent = ru ? 'Результат' : 'Result';
       $('preview-submit').textContent = labels.submit;
       document.querySelector('#preview-step-result h3').textContent = labels.result;
       document.querySelector('#preview-step-result .modal-copy').textContent = labels.warning;
       document.querySelector('[data-i18n="previewResultId"]').textContent = 'Peer ID';
       document.querySelector('[data-i18n="previewResultStatus"]').textContent = labels.status;
-      $('create-one-time-warning').textContent = labels.warning;
       document.querySelector('[for="create-config-text"] span').textContent = labels.config;
       $('create-qr').setAttribute('aria-label', labels.qr);
       $('create-qr-caption').textContent = ru ? 'QR содержит приватную .conf для совместимых сканеров. Совместимость не проверена; рекомендуем скачать .conf.' : 'QR contains the private .conf for compatible scanners. Scanner compatibility is unverified; download .conf is recommended.';
+      $('create-qr-summary').textContent = ru ? 'Показать QR' : 'Show QR';
+      $('create-text-summary').textContent = ru ? 'Показать текст .conf' : 'Show .conf text';
       $('create-config-copy').textContent = labels.copy;
       $('create-config-download').textContent = labels.download;
     }
@@ -1548,7 +1555,7 @@
     $('preview-result-name').textContent = wizard.result ? (realCanary ? wizard.result.client.name : wizard.result.name) : '—';
     $('preview-result-tags').textContent = wizard.result ? ((realCanary ? wizard.result.client.tags : wizard.result.tags).join(', ') || t('noTags')) : '—';
     $('preview-result-status').textContent = wizard.result ? (realCanary ? wizard.result.client.status : wizard.result.status) : 'DRY_RUN';
-    $('preview-result-boundary').textContent = wizard.result ? (realCanary ? (state.locale === 'ru' ? 'Реальный peer создан · сохраните конфигурацию сейчас' : 'Real peer created · save configuration now') : wizard.result.boundary + ' · KEYS / CONFIG / QR NOT GENERATED') : t('previewNoPeerCreated');
+    $('preview-result-boundary').textContent = wizard.result ? (realCanary ? (state.locale === 'ru' ? 'Peer создан · конфигурация доступна повторно в меню клиента' : 'Peer created · configuration remains available in the client menu') : wizard.result.boundary + ' · KEYS / CONFIG / QR NOT GENERATED') : t('previewNoPeerCreated');
   }
 
   function renderActionMenu() {
@@ -1677,19 +1684,26 @@
     if (realCanary) {
       const ru = state.locale === 'ru';
       $('config-preview-title').textContent = ru ? 'Конфигурация клиента' : 'Client configuration';
+      document.querySelector('#config-preview-modal .eyebrow').textContent = ru ? 'КЛИЕНТ / КОНФИГУРАЦИЯ' : 'CLIENT / CONFIGURATION';
       $('config-preview-copy-text').textContent = ru ? 'Приватная конфигурация. Скачивайте и показывайте QR только на доверенном устройстве.' : 'Private configuration. Download and display the QR only on a trusted device.';
       $('config-preview-download').textContent = ru ? 'Скачать .conf' : 'Download .conf';
+      $('config-preview-tab-edit').textContent = ru ? 'Параметры' : 'Settings';
+      $('config-edit-intro').textContent = ru ? 'Сохраняется для повторной выдачи этого клиента. Ключи и параметры сервера не меняются.' : 'Saved for this client’s future downloads. Keys and server parameters stay unchanged.';
+      $('config-edit-save').textContent = ru ? 'Сохранить параметры' : 'Save settings';
     }
     const modal = $('config-preview-modal');
     modal.hidden = !config.open;
     modal.setAttribute('aria-hidden', String(!config.open));
     const result = config.result;
-    $('config-preview-tab-qr').setAttribute('aria-selected', String(config.tab === 'qr'));
-    $('config-preview-tab-config').setAttribute('aria-selected', String(config.tab === 'config'));
-    $('config-preview-tab-qr').classList.toggle('is-active', config.tab === 'qr');
-    $('config-preview-tab-config').classList.toggle('is-active', config.tab === 'config');
+    for (const tab of ['qr', 'config', 'edit']) {
+      $(`config-preview-tab-${tab}`).setAttribute('aria-selected', String(config.tab === tab));
+      $(`config-preview-tab-${tab}`).classList.toggle('is-active', config.tab === tab);
+    }
+    $('config-preview-tab-edit').hidden = !realCanary;
     $('config-preview-qr-panel').hidden = !config.open || config.tab !== 'qr';
     $('config-preview-config-panel').hidden = !config.open || config.tab !== 'config';
+    $('config-preview-edit-panel').hidden = !config.open || config.tab !== 'edit';
+    $('config-edit-save').disabled = config.loading || config.saving || !config.result;
     $('config-preview-copy').disabled = config.loading || !result;
     $('config-preview-download').disabled = config.loading || !result;
     if (!result) {
@@ -1718,6 +1732,21 @@
       $('config-preview-qr-payload').textContent = result.qrPayload;
     }
     $('config-preview-text').textContent = result.configText;
+  }
+
+  function savedConfigSettings(text) {
+    const field = (name) => text.match(new RegExp(`^${name} = (.+)$`, 'm'))?.[1] || '';
+    return { dns_server: field('DNS'), allowed_ips: field('AllowedIPs'),
+      mtu: Number(field('MTU') || '1420'), keepalive: Number(field('PersistentKeepalive')) };
+  }
+
+  function setConfigEditForm(text) {
+    const form = $('config-edit-form');
+    const settings = savedConfigSettings(text);
+    for (const field of ['dns_server', 'allowed_ips', 'mtu', 'keepalive']) {
+      form.elements.namedItem(field).value = String(settings[field]);
+    }
+    $('config-edit-status').textContent = '';
   }
 
   function parseTagsInput(value) {
@@ -1893,7 +1922,7 @@
     const isCurrentRequest = () => activeConfigPreviewRequest === requestToken &&
       state.configPreview.open && state.configPreview.clientId === id;
     state.actionMenu = { open: false, clientId: null };
-    state.configPreview = { open: true, clientId: id, tab: 'qr', loading: true, error: '', result: null };
+    state.configPreview = { open: true, clientId: id, tab: 'qr', loading: true, saving: false, error: '', result: null };
     render();
     window.setTimeout(() => $('config-preview-tab-qr').focus(), 0);
     try {
@@ -1904,9 +1933,11 @@
       if (realCanary) {
         const result = normalizeCreatedClient({ ...preview, oneTime: false }, currentClient.name, currentClient.tags);
         if (result.client.id !== id) throw new Error('malformed_configuration_result');
+        if (!/^[0-9a-f]{64}$/.test(preview.revision)) throw new Error('malformed_configuration_revision');
         state.configPreview.result = { clientId: id, clientName: currentClient.name,
           expiration: currentClient.expiration || '', status: currentClient.status,
-          configText: result.configText, qrDataUri: result.qrDataUri };
+          configText: result.configText, qrDataUri: result.qrDataUri, revision: preview.revision };
+        setConfigEditForm(result.configText);
       } else {
         state.configPreview.result = normalizeConfigurationPreview(preview, currentClient);
         recordAuditAction('CONFIG_PREVIEWED', client.name, 'DRY_RUN', 'Configuration preview содержит только mock data.', 'Configuration preview contains mock data only.');
@@ -1927,15 +1958,47 @@
   function closeConfigurationPreview({ restoreFocus = true } = {}) {
     const id = state.configPreview.clientId;
     activeConfigPreviewRequest = null;
-    state.configPreview = { open: false, clientId: null, tab: 'qr', loading: false, error: '', result: null };
+    state.configPreview = { open: false, clientId: null, tab: 'qr', loading: false, saving: false, error: '', result: null };
     render();
     if (restoreFocus && id) focusClientAction(id);
   }
 
   function setConfigurationTab(tab) {
-    state.configPreview.tab = tab === 'config' ? 'config' : 'qr';
+    state.configPreview.tab = realCanary && tab === 'edit' ? 'edit' : tab === 'config' ? 'config' : 'qr';
     render();
     $(`config-preview-tab-${state.configPreview.tab}`).focus();
+  }
+
+  async function saveClientConfiguration() {
+    const config = state.configPreview;
+    if (!realCanary || !config.open || !config.result || config.saving) return;
+    const form = $('config-edit-form');
+    if (!form.reportValidity()) return;
+    const settings = {
+      dns_server: form.elements.namedItem('dns_server').value.trim(),
+      allowed_ips: form.elements.namedItem('allowed_ips').value.trim(),
+      mtu: Number(form.elements.namedItem('mtu').value),
+      keepalive: Number(form.elements.namedItem('keepalive').value)
+    };
+    config.saving = true;
+    $('config-edit-status').textContent = state.locale === 'ru' ? 'Сохраняю…' : 'Saving…';
+    renderConfigPreview();
+    try {
+      const updated = await adapter.updateConfiguration(config.clientId, config.result.revision, settings);
+      if (!config.open || state.configPreview !== config) return;
+      const client = state.clients.find((item) => item.id === config.clientId);
+      const result = normalizeCreatedClient({ ...updated, oneTime: false }, client.name, client.tags);
+      if (result.client.id !== config.clientId || !/^[0-9a-f]{64}$/.test(updated.revision)) throw new Error('invalid_config_update');
+      config.result = { ...config.result, configText: result.configText, qrDataUri: result.qrDataUri, revision: updated.revision };
+      setConfigEditForm(result.configText);
+      $('config-edit-status').textContent = state.locale === 'ru' ? 'Сохранено' : 'Saved';
+      showToast(state.locale === 'ru' ? 'Конфигурация клиента сохранена' : 'Client configuration saved', 'success');
+    } catch (_error) {
+      $('config-edit-status').textContent = state.locale === 'ru' ? 'Не удалось сохранить. Закройте окно и откройте конфиг заново.' : 'Save failed. Reopen the configuration and try again.';
+    } finally {
+      config.saving = false;
+      if (config.open && state.configPreview === config) renderConfigPreview();
+    }
   }
 
   async function copyConfiguration() {
@@ -2514,6 +2577,11 @@
   });
 
   document.addEventListener('submit', (event) => {
+    if (event.target.id === 'config-edit-form') {
+      event.preventDefault();
+      saveClientConfiguration();
+      return;
+    }
     const form = event.target.closest('[data-template-profile]');
     if (!form) return;
     event.preventDefault();

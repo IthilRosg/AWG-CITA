@@ -8,8 +8,9 @@ Version 0.2.0 provides interface state, safe peer metadata, traffic counters,
 a client dossier, bounded status history and a localized operator UI. The
 authenticated client registry supports isolated AWG 3.1, AWG 2.0 and plain
 WireGuard interfaces with create, enable, disable, delete, and repeat
-configuration/QR retrieval. The Profiles menu edits templates for future
-client configurations. See [the profile design](docs/MULTI_PROFILE_0_2_0.md).
+configuration/QR retrieval. Saved client configurations can edit DNS, AllowedIPs,
+MTU and keepalive without changing keys or server peers. The Profiles menu edits
+templates for future clients. See [the profile design](docs/MULTI_PROFILE_0_2_0.md).
 
 ## Product boundary
 

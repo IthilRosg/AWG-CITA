@@ -100,12 +100,38 @@ class CanaryHttpTests(unittest.TestCase):
         config = '[Interface]\nPrivateKey = SYNTHETIC-ONLY\n'
         self.server.RequestHandlerClass.lifecycle_service.adapter.get_configuration = lambda _id: {
             'schema_version': 1, 'client': RECORD, 'configText': config,
-            'qrDataUri': 'data:image/png;base64,c3ludGhldGlj'}
+            'qrDataUri': 'data:image/png;base64,c3ludGhldGlj', 'revision': 'a' * 64}
         status, headers, body = self.request('GET', path, headers={'Cookie': cookie})
         self.assertEqual(status, 200)
         self.assertEqual(headers['Cache-Control'], 'no-store')
         self.assertEqual(json.loads(body)['configText'], config)
+        self.assertEqual(json.loads(body)['revision'], 'a' * 64)
         self.assertEqual(self.request('GET', path + '?copy=1', headers={'Cookie': cookie})[0], 404)
+
+    def test_saved_config_update_requires_csrf_and_returns_readback(self):
+        path = f'/api/clients/{PEER_ID}/config'
+        _, headers, html = self.request('GET', '/')
+        csrf = re.search(r'<meta name="csrf-token" content="([^"]+)">', html).group(1)
+        cookie = headers['Set-Cookie'].split(';', 1)[0]
+        adapter = self.server.RequestHandlerClass.lifecycle_service.adapter
+        stored = {'mtu': 1420, 'revision': 'a' * 64}
+        adapter.get_configuration = lambda _id: {
+            'schema_version': 1, 'client': RECORD, 'configText': f'MTU = {stored["mtu"]}',
+            'qrDataUri': 'data:image/png;base64,c3ludGhldGlj', 'revision': stored['revision']}
+        def update(_id, expected, settings):
+            self.assertEqual(expected, 'a' * 64)
+            stored.update(mtu=settings['mtu'], revision='b' * 64)
+            return adapter.get_configuration(_id)
+        adapter.update_configuration = update
+        payload = json.dumps({'dns_server': '127.0.0.1', 'allowed_ips': '0.0.0.0/0', 'mtu': 1280,
+                              'keepalive': 25, 'expectedRevision': 'a' * 64, 'idempotencyKey': 'config-edit-001'})
+        basic = {'Cookie': cookie, 'Content-Type': 'application/json'}
+        self.assertEqual(self.request('POST', path, payload, basic)[0], 403)
+        trusted = {**basic, 'Origin': self.origin, 'X-CSRF-Token': csrf}
+        status, _, body = self.request('POST', path, payload, trusted)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)['revision'], 'b' * 64)
+        self.assertEqual(json.loads(body)['configText'], 'MTU = 1280')
 
     def test_profile_routes_keep_client_inventories_separate(self):
         handler = self.server.RequestHandlerClass

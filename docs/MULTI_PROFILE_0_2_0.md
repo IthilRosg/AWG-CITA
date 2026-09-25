@@ -7,11 +7,20 @@ profile provides Create, Enable, Disable, Delete, configuration download and
 QR. The existing AWG 3.1 API paths remain valid.
 
 The Profiles menu edits DNS, AllowedIPs, MTU and keepalive for **future**
-client files. Already issued files remain byte-for-byte available from the
-client menu. Server interface addresses, ports and obfuscation parameters live
+client files. Each existing client's configuration can also edit these four
+fields separately. A saved edit replaces that client's protected `.conf` and
+regenerates its QR; it never changes keys, address, endpoint, server peer or
+obfuscation parameters. The editor checks a revision token before an atomic
+write, so a stale browser tab cannot silently overwrite a newer file. Server
+interface addresses, ports and obfuscation parameters live
 in root-owned files and are not editable from the browser. Template updates
 use an authenticated, CSRF-protected endpoint and a fixed sudo helper. Only
 Delete retains the extra UI confirmation.
+
+The Create result presents Download and Copy first. QR and raw configuration
+text stay folded until requested. The existing-client configuration dialog
+offers QR, text, and the constrained settings editor. Saved configuration is
+private and is never included in status, history, or action audit records.
 
 ## Isolation and installation
 
