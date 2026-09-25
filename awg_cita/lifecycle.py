@@ -248,7 +248,7 @@ class LifecycleService:
         self._create_nonces: set[str] = set()
 
     def create_client(self, name: str, tags: list[str], idempotency_key: str, acknowledged: object) -> dict[str, Any]:
-        """One-time provisioning: never cache the secret result or audit its content."""
+        """Provisioning response: never cache the secret in this service or audit its content."""
         if acknowledged is not True:
             raise LifecycleError('invalid_request')
         self._validate_name(name)
@@ -269,7 +269,7 @@ class LifecycleService:
             # Do not retain the adapter exception: it may have secret-bearing args.
             if value is None:
                 raise LifecycleError('awg_command_failed')
-            if not isinstance(value, dict) or set(value) != {'schema_version', 'client', 'configText', 'qrDataUri', 'oneTime'} or type(value['schema_version']) is not int or value['schema_version'] != 1 or value['oneTime'] is not True:
+            if not isinstance(value, dict) or set(value) != {'schema_version', 'client', 'configText', 'qrDataUri', 'oneTime'} or type(value['schema_version']) is not int or value['schema_version'] != 1 or value['oneTime'] is not False:
                 raise LifecycleError('internal_error')
             client = self._safe_client(value['client'])
             if client['name'] != name or client['tags'] != tags or client['status'] == 'DISABLED':
@@ -280,7 +280,7 @@ class LifecycleService:
                 raise LifecycleError('internal_error')
             self._record_audit('createClient', client['id'], 'OK')
             return {'schema_version': 1, 'client': client, 'configText': value['configText'],
-                    'qrDataUri': value['qrDataUri'], 'oneTime': True}
+                    'qrDataUri': value['qrDataUri'], 'oneTime': False}
         except LifecycleError:
             raise
         except Exception:
@@ -399,6 +399,25 @@ class LifecycleService:
             mapped = self._adapter_error(error, operation="configuration")
             self._record_audit("generateConfigurationPreview", client_id, "ERROR", mapped.code)
             raise mapped from error
+
+    def get_configuration(self, client_id: str) -> dict[str, Any]:
+        self._validate_client_id(client_id)
+        try:
+            value = self.adapter.get_configuration(client_id)
+            client = self._safe_client(value['client'])
+            if (client['id'] != client_id or not isinstance(value['configText'], str) or
+                    not 1 <= len(value['configText']) <= 2400 or
+                    not isinstance(value['qrDataUri'], str) or
+                    not value['qrDataUri'].startswith('data:image/png;base64,') or
+                    len(value['qrDataUri']) > 65536):
+                raise LifecycleError('configuration_failed')
+            self._record_audit('getConfiguration', client_id, 'OK')
+            return {'schema_version': 1, 'client': client,
+                    'configText': value['configText'], 'qrDataUri': value['qrDataUri']}
+        except LifecycleError:
+            raise
+        except Exception:
+            raise LifecycleError('configuration_failed') from None
 
     def audit_events(self) -> list[AuditEvent]:
         with self._audit_lock:

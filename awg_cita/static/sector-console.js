@@ -797,7 +797,7 @@
     }
     async createClient(payload) { return this.request('/api/clients', payload); }
     async updateClient() { throw new Error('backend_stub'); }
-    async generateConfigurationPreview() { throw new Error('backend_stub'); }
+    async generateConfigurationPreview(id) { return this.request(`/api/clients/${encodeURIComponent(id)}/config`); }
   }
 
   const shell = document.querySelector('.shell');
@@ -810,7 +810,7 @@
       stateDescription: 'Состояние по AWG read-back',
       adapterMock: 'REAL CANARY',
       clientsSubtitle: 'Поиск, фильтры и карточки по данным awg-canary0.',
-      configBoundary: 'Конфигурация доступна только при создании peer',
+      configBoundary: 'Конфигурация доступна в меню клиента',
       previewResultCopy: 'Результат получен от awg-canary0.',
       footerText: 'AWG CITA / КАНАРНЫЙ КОНТУР',
       footerMode: 'REAL CANARY · AWG READ-BACK'
@@ -819,28 +819,12 @@
       stateDescription: 'State from AWG read-back',
       adapterMock: 'REAL CANARY',
       clientsSubtitle: 'Search, filters, and client details from awg-canary0.',
-      configBoundary: 'Configuration is available only when a peer is created',
+      configBoundary: 'Configuration is available in the client menu',
       previewResultCopy: 'Result received from awg-canary0.',
       footerText: 'AWG CITA / CANARY ENVIRONMENT',
       footerMode: 'REAL CANARY · AWG READ-BACK'
     }
   };
-  const CREATE_PENDING_KEY = 'awg-cita-canary-create-pending';
-  function readPendingCreate() {
-    try {
-      const saved = JSON.parse(localStorage.getItem(CREATE_PENDING_KEY) || 'null');
-      if (!saved) return null;
-      if (/^[0-9a-f-]{36}$/i.test(saved.nonce) && PREVIEW_NAME_PATTERN.test(saved.name) &&
-          Array.isArray(saved.tags) && saved.tags.length <= 5 && Array.isArray(saved.baseline) && saved.baseline.length <= MAX_CLIENT_RECORDS &&
-          saved.tags.every(tag => typeof tag === 'string' && PREVIEW_TAG_PATTERN.test(tag)) &&
-          saved.baseline.every(id => typeof id === 'string' && /^peer-[A-Za-z0-9_-]{1,64}$/.test(id))) return saved;
-    } catch (_error) { /* Fail closed below. */ }
-    return { nonce: 'unavailable', name: '', tags: [], baseline: [] };
-  }
-  let pendingCreate = realCanary ? readPendingCreate() : null;
-  let createCandidates = [];
-  let createListChecked = false;
-  let createChecking = false;
 
   function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
@@ -1001,7 +985,7 @@
     const encoded = typeof png === 'string' && /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/.exec(png);
     let bytes = null;
     try { if (encoded && png.length <= 131072) bytes = atob(encoded[1]); } catch (_error) { /* invalid image */ }
-    if (value.schema_version !== 1 || value.oneTime !== true ||
+    if (value.schema_version !== 1 || value.oneTime !== false ||
         client.name !== expectedName || JSON.stringify(client.tags) !== JSON.stringify(expectedTags) ||
         typeof value.configText !== 'string' || !value.configText.length || value.configText.length > 16384 ||
         /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value.configText) ||
@@ -1496,40 +1480,19 @@
     $('preview-cancel').hidden = !wizard.open || wizard.step === 'result';
     $('preview-submit').hidden = !wizard.open || wizard.step !== 'form';
     $('preview-done').hidden = !wizard.open || wizard.step !== 'result';
-    $('preview-submit').disabled = wizard.submitting || Boolean(realCanary && pendingCreate);
-    if (realCanary) {
-      let notice = $('create-reconcile');
-      if (!notice) {
-        notice = document.createElement('div');
-        notice.id = 'create-reconcile';
-        notice.className = 'notice notice-error';
-        notice.setAttribute('role', 'alert');
-        notice.innerHTML = '<p id="create-reconcile-detail"></p><button id="create-reconcile-check" class="button" type="button"></button>';
-        $('preview-step-form').after(notice);
-      }
-      notice.hidden = !wizard.open || !pendingCreate;
-      if (pendingCreate) {
-        const ru = state.locale === 'ru';
-        const candidates = createCandidates.map(c => `${c.id} (${c.name})`).join(', ');
-        $('create-reconcile-detail').textContent = `${ru ? 'Исход Create неизвестен. Повтор запрещён; private key и .conf нельзя восстановить. Попытка nonce:' : 'Create outcome unknown. Retry blocked; private key and .conf cannot be recovered. Attempt nonce:'} ${pendingCreate.nonce}. ${ru ? 'Проверьте список и вручную разрешите возможный orphan:' : 'Check public list and manually resolve possible orphan:'} ${createListChecked ? (candidates || (ru ? 'новый peer не обнаружен' : 'no new peer found')) : (ru ? 'проверка ожидается' : 'check pending')}`;
-        $('create-reconcile-check').textContent = createListChecked && !createCandidates.length
-          ? (ru ? 'Снять блокировку' : 'Clear block')
-          : (ru ? 'Проверить список' : 'Check list');
-        $('create-reconcile-check').disabled = createChecking || wizard.submitting || pendingCreate.nonce === 'unavailable';
-      }
-    }
+    $('preview-submit').disabled = wizard.submitting;
     if (realCanary) {
       const ru = state.locale === 'ru';
       const labels = ru ? {
-        button: 'Создать клиента', title: 'Создание клиента · реальный peer', intro: 'Создание peer и одноразовой полной конфигурации на awg-canary0.',
+        button: 'Создать клиента', title: 'Создание клиента · реальный peer', intro: 'Создание peer для AmneziaWG 3.1 на awg-canary0.',
         submit: 'Создать peer',
-        result: 'Клиент создан', status: 'Статус', warning: 'Приватная конфигурация показана только сейчас. Сохраните .conf; восстановить private key позже нельзя.',
+        result: 'Клиент создан', status: 'Статус', warning: 'Конфигурация доступна в меню клиента. Для подключения используйте AmneziaWG 3.1.',
         config: 'Конфигурация · приватная', qr: 'QR с приватной конфигурацией для совместимых сканеров; совместимость не проверена',
         copy: 'Копировать', download: 'Скачать .conf · рекомендуется', boundary: 'Реальный peer создан · сохраните конфигурацию сейчас'
       } : {
-        button: 'Create client', title: 'Create client · real peer', intro: 'Creates a peer and one-time full-tunnel configuration on awg-canary0.',
+        button: 'Create client', title: 'Create client · real peer', intro: 'Creates an AmneziaWG 3.1 peer on awg-canary0.',
         submit: 'Create peer',
-        result: 'Client created', status: 'Status', warning: 'Private configuration is shown only now. Save the .conf; the private key cannot be recovered later.',
+        result: 'Client created', status: 'Status', warning: 'Configuration is available in the client menu. Connect with AmneziaWG 3.1.',
         config: 'Configuration · private', qr: 'QR containing private configuration for compatible scanners; compatibility unverified',
         copy: 'Copy', download: 'Download .conf · recommended', boundary: 'Real peer created · save configuration now'
       };
@@ -1578,10 +1541,11 @@
     menu.dataset.clientId = client.id;
     for (const name of ['edit', 'config']) {
       const button = $(`client-action-${name}`);
-      button.disabled = realCanary;
-      button.setAttribute('aria-disabled', String(realCanary));
-      button.setAttribute('role', realCanary ? 'presentation' : 'menuitem');
-      button.tabIndex = realCanary ? -1 : 0;
+      const disabledAction = realCanary && name === 'edit';
+      button.disabled = disabledAction;
+      button.setAttribute('aria-disabled', String(disabledAction));
+      button.setAttribute('role', disabledAction ? 'presentation' : 'menuitem');
+      button.tabIndex = disabledAction ? -1 : 0;
     }
     const disabled = client.status === 'DISABLED';
     $('client-action-disable').hidden = disabled;
@@ -1690,6 +1654,12 @@
 
   function renderConfigPreview() {
     const config = state.configPreview;
+    if (realCanary) {
+      const ru = state.locale === 'ru';
+      $('config-preview-title').textContent = ru ? 'Конфигурация клиента' : 'Client configuration';
+      $('config-preview-copy-text').textContent = ru ? 'Приватная конфигурация. Скачивайте и показывайте QR только на доверенном устройстве.' : 'Private configuration. Download and display the QR only on a trusted device.';
+      $('config-preview-download').textContent = ru ? 'Скачать .conf' : 'Download .conf';
+    }
     const modal = $('config-preview-modal');
     modal.hidden = !config.open;
     modal.setAttribute('aria-hidden', String(!config.open));
@@ -1707,6 +1677,7 @@
       $('config-preview-expiration').textContent = '—';
       $('config-preview-status').textContent = '—';
       $('config-preview-qr').setAttribute('aria-label', t('configQrTab'));
+      $('config-preview-qr').replaceChildren();
       $('config-preview-qr-payload').textContent = '—';
       $('config-preview-text').textContent = '# MOCK CONFIGURATION';
       return;
@@ -1715,7 +1686,17 @@
     $('config-preview-expiration').textContent = result.expiration ? formatDate(result.expiration) : '—';
     $('config-preview-status').textContent = result.status;
     $('config-preview-qr').setAttribute('aria-label', `${t('configQrTab')}: ${result.clientName} · ${result.status}`);
-    $('config-preview-qr-payload').textContent = result.qrPayload;
+    if (realCanary) {
+      const qr = document.createElement('img');
+      qr.src = result.qrDataUri;
+      qr.alt = state.locale === 'ru' ? 'QR конфигурации клиента' : 'Client configuration QR';
+      qr.width = 220;
+      qr.height = 220;
+      $('config-preview-qr').replaceChildren(qr);
+      $('config-preview-qr-payload').textContent = state.locale === 'ru' ? 'QR содержит приватную конфигурацию' : 'QR contains private configuration';
+    } else {
+      $('config-preview-qr-payload').textContent = result.qrPayload;
+    }
     $('config-preview-text').textContent = result.configText;
   }
 
@@ -1900,8 +1881,16 @@
       const preview = await adapter.generateConfigurationPreview(id);
       if (!isCurrentRequest()) return;
       const currentClient = state.clients.find((item) => item.id === id);
-      state.configPreview.result = normalizeConfigurationPreview(preview, currentClient);
-      recordAuditAction('CONFIG_PREVIEWED', client.name, 'DRY_RUN', 'Configuration preview содержит только mock data.', 'Configuration preview contains mock data only.');
+      if (realCanary) {
+        const result = normalizeCreatedClient({ ...preview, oneTime: false }, currentClient.name, currentClient.tags);
+        if (result.client.id !== id) throw new Error('malformed_configuration_result');
+        state.configPreview.result = { clientId: id, clientName: currentClient.name,
+          expiration: currentClient.expiration || '', status: currentClient.status,
+          configText: result.configText, qrDataUri: result.qrDataUri };
+      } else {
+        state.configPreview.result = normalizeConfigurationPreview(preview, currentClient);
+        recordAuditAction('CONFIG_PREVIEWED', client.name, 'DRY_RUN', 'Configuration preview содержит только mock data.', 'Configuration preview contains mock data only.');
+      }
       showToast(t('configDownloadReady'), 'success');
     } catch (_error) {
       if (!isCurrentRequest()) return;
@@ -1962,7 +1951,7 @@
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `awg-cita-mock-${result.clientId}.conf`;
+    link.download = realCanary ? `awg-cita-${result.clientId}.conf` : `awg-cita-mock-${result.clientId}.conf`;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -1984,7 +1973,6 @@
   }
 
   function openCreatePreview() {
-    if (realCanary) pendingCreate = pendingCreate || readPendingCreate();
     resetCreatePreview();
     state.createPreview.open = true;
     render();
@@ -2026,38 +2014,9 @@
     return true;
   }
 
-  async function checkPendingCreate() {
-    if (!realCanary || !pendingCreate || createChecking) return;
-    createChecking = true;
-    createListChecked = false;
-    render();
-    try {
-      const clients = normalizeClients(await adapter.listClients());
-      state.clients = clients;
-      createCandidates = clients.filter(c => !pendingCreate.baseline.includes(c.id));
-      createListChecked = true;
-    } catch (_error) {
-      createCandidates = [];
-      createListChecked = false;
-      state.createPreview.error = 'realCreateError';
-    } finally {
-      createChecking = false;
-      render();
-    }
-  }
-
-  function clearResolvedCreate() {
-    if (!pendingCreate || pendingCreate.nonce === 'unavailable' || !createListChecked || createChecking || createCandidates.length) return;
-    localStorage.removeItem(CREATE_PENDING_KEY);
-    pendingCreate = null;
-    createListChecked = false;
-    render();
-  }
-
   async function submitCreatePreview() {
     if (state.createPreview.step !== 'form') return;
-    if (realCanary) pendingCreate = pendingCreate || readPendingCreate();
-    if (state.createPreview.submitting || (realCanary && (pendingCreate || state.loading || state.error))) {
+    if (state.createPreview.submitting) {
       render();
       return;
     }
@@ -2071,20 +2030,14 @@
     render();
     try {
       if (realCanary) {
-        // Persist only non-secret attempt metadata before a POST can reach the server.
         const attempt = { nonce: crypto.randomUUID(), name: state.createPreview.name,
-          tags: state.createPreview.tags.slice(), baseline: state.clients.map(c => c.id) };
-        localStorage.setItem(CREATE_PENDING_KEY, JSON.stringify(attempt));
-        pendingCreate = attempt;
-        render();
+          tags: state.createPreview.tags.slice() };
         const result = normalizeCreatedClient(await adapter.createClient({
           name: attempt.name,
           tags: attempt.tags,
           idempotencyKey: attempt.nonce,
           acknowledged: true
         }), attempt.name, attempt.tags);
-        localStorage.removeItem(CREATE_PENDING_KEY);
-        pendingCreate = null;
         state.createPreview.result = result;
         state.createPreview.step = 'result';
         // Read back only public records; never feed private configuration to activity/audit hooks.
@@ -2119,7 +2072,9 @@
       }
     } catch (_error) {
       state.createPreview.error = realCanary ? 'realCreateError' : 'previewAdapterError';
-      if (realCanary && pendingCreate) await checkPendingCreate();
+      if (realCanary) {
+        try { state.clients = normalizeClients(await adapter.listClients()); } catch (_readError) { /* Create stays available. */ }
+      }
     } finally {
       state.createPreview.submitting = false;
       render();
@@ -2156,7 +2111,7 @@
       const ru = state.locale === 'ru';
       document.querySelector('.rail-status strong').textContent = 'AWG-CITA / CANARY';
       document.querySelector('.rail-status small').textContent = ru ? 'Реальные действия с peer' : 'Real peer actions';
-      $('mutation-boundary').textContent = ru ? 'Create / Disable / Enable / Delete применяются к awg-canary0. Конфигурация показывается только при создании; повторное получение отключено.' : 'Create / Disable / Enable / Delete apply to awg-canary0. Configuration is shown only at creation; retrieval later is disabled.';
+      $('mutation-boundary').textContent = ru ? 'Create / Disable / Enable / Delete применяются к awg-canary0. Конфигурация и QR доступны в меню клиента.' : 'Create / Disable / Enable / Delete apply to awg-canary0. Configuration and QR are available in the client menu.';
       document.querySelector('[data-i18n="trafficDescription"]').textContent = ru ? 'RX + TX по AWG read-back' : 'RX + TX from AWG read-back';
       document.querySelector('[data-i18n="deleteEyebrow"]').textContent = 'DESTRUCTIVE ACTION / AWG CANARY';
     }
@@ -2391,13 +2346,6 @@
     }
     if (event.target.closest('#preview-close') || event.target.closest('#preview-cancel') || event.target.closest('#preview-done')) {
       closeCreatePreview();
-      return;
-    }
-    if (event.target.closest('#create-reconcile-check')) {
-      if (!state.createPreview.submitting) {
-        if (createListChecked && !createCandidates.length) clearResolvedCreate();
-        else checkPendingCreate();
-      }
       return;
     }
     if (event.target.closest('#preview-submit')) {

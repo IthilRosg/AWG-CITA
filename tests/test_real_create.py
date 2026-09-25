@@ -94,10 +94,10 @@ class AdapterCreateTests(unittest.TestCase):
         from awg_cita.app import AwgReader
         import json
         record = {'id': 'peer-0123456789abcdef', 'name': 'New Device', 'status': 'NEVER', 'lastHandshakeAt': None, 'lastSeenAt': None, 'createdAt': None, 'expiration': '', 'rxBytes': 0, 'txBytes': 0, 'notes': '', 'tags': [], 'warning': ''}
-        reply = {'schema_version': 1, 'client': record, 'configText': 'secret-fixture', 'qrDataUri': 'data:image/png;base64,Zml4dHVyZQ==', 'oneTime': True}
+        reply = {'schema_version': 1, 'client': record, 'configText': 'secret-fixture', 'qrDataUri': 'data:image/png;base64,Zml4dHVyZQ==', 'oneTime': False}
         with patch.object(AwgReader, '_run', return_value=(json.dumps(reply), '')) as run:
             result = RealAwgLifecycleAdapter().create_client('New Device', [], 'request-0001')
-        self.assertEqual(result['oneTime'], True)
+        self.assertEqual(result['oneTime'], False)
         argv, timeout, body = run.call_args.args
         self.assertEqual(argv, ('/usr/bin/sudo', '-n', '--', '/usr/local/sbin/awg-cita-peer', 'create'))
         self.assertEqual(json.loads(body), {'name': 'New Device', 'tags': [], 'idempotencyKey': 'request-0001'})
@@ -122,7 +122,7 @@ class ServiceCreateTests(unittest.TestCase):
         from tests.test_real_http import CanaryHttpTests
         class CreatingAdapter(FakeAwgLifecycleAdapter):
             def create_client(self, name, tags, nonce):
-                return {'schema_version': 1, 'client': dict(self._clients[0], name=name, tags=tags), 'configText': 'secret-fixture', 'qrDataUri': 'data:image/png;base64,Zml4dHVyZQ==', 'oneTime': True}
+                return {'schema_version': 1, 'client': dict(self._clients[0], name=name, tags=tags), 'configText': 'secret-fixture', 'qrDataUri': 'data:image/png;base64,Zml4dHVyZQ==', 'oneTime': False}
         case = CanaryHttpTests('test_bad_methods_content_and_payload_fail_without_mutation')
         case.setUp()
         try:
@@ -137,7 +137,7 @@ class ServiceCreateTests(unittest.TestCase):
             status, response_headers, body = case.request('POST', '/api/clients', payload, trusted)
             self.assertEqual(status, 200)
             self.assertEqual(response_headers['Cache-Control'], 'no-store')
-            self.assertEqual(json.loads(body)['oneTime'], True)
+            self.assertEqual(json.loads(body)['oneTime'], False)
             self.assertEqual(case.request('POST', '/api/clients', payload, trusted)[0], 409)
         finally:
             case.tearDown()
@@ -148,11 +148,11 @@ class ServiceCreateTests(unittest.TestCase):
                 self.calls = 0
             def create_client(self, name, tags, nonce):
                 self.calls += 1
-                return {'schema_version': 1, 'client': {'id': 'peer-0123456789abcdef', 'name': name, 'status': 'NEVER', 'lastHandshakeAt': None, 'lastSeenAt': None, 'createdAt': None, 'expiration': '', 'rxBytes': 0, 'txBytes': 0, 'notes': '', 'tags': tags, 'warning': ''}, 'configText': 'secret-fixture', 'qrDataUri': 'data:image/png;base64,Zml4dHVyZQ==', 'oneTime': True}
+                return {'schema_version': 1, 'client': {'id': 'peer-0123456789abcdef', 'name': name, 'status': 'NEVER', 'lastHandshakeAt': None, 'lastSeenAt': None, 'createdAt': None, 'expiration': '', 'rxBytes': 0, 'txBytes': 0, 'notes': '', 'tags': tags, 'warning': ''}, 'configText': 'secret-fixture', 'qrDataUri': 'data:image/png;base64,Zml4dHVyZQ==', 'oneTime': False}
         adapter = Adapter()
         service = LifecycleService(adapter)
         result = service.create_client('New Device', [], 'request-0001', True)
-        self.assertEqual(result['oneTime'], True)
+        self.assertEqual(result['oneTime'], False)
         self.assertFalse('secret-fixture' in repr(service.__dict__))
         self.assertFalse('data:image/png' in repr(service.__dict__))
         with self.assertRaises(LifecycleError):
@@ -177,7 +177,7 @@ class RealCreateTests(unittest.TestCase):
             qr.return_value.png_data_uri.return_value = 'data:image/png;base64,Zml4dHVyZQ=='
             result = controller.create('New Device', [], 'request-hooks-01',
                                        lambda: (CLIENT_PRIVATE, CLIENT_PUBLIC), lambda: SERVER_PUBLIC)
-        self.assertTrue(result['oneTime'])
+        self.assertFalse(result['oneTime'])
         self.assertIn(hooks, state['config'])
         self.assertEqual(state['config'].count(b'PostUp = true\n'), 2)
         self.assertEqual(state['config'].count(b'PostDown = true\n'), 2)
@@ -204,7 +204,7 @@ class RealCreateTests(unittest.TestCase):
             qr.return_value.png_data_uri.return_value = 'data:image/png;base64,Zml4dHVyZQ=='
             result = controller.create('New Device', ['mobile'], 'request-0001', lambda: (CLIENT_PRIVATE, CLIENT_PUBLIC), lambda: SERVER_PUBLIC)
             self.assertTrue(qr.call_args.args[0] == result['configText'])
-        self.assertEqual(result['oneTime'], True)
+        self.assertEqual(result['oneTime'], False)
         self.assertEqual(result['schema_version'], 1)
         self.assertTrue(result['qrDataUri'] == 'data:image/png;base64,Zml4dHVyZQ==')
         self.assertTrue('Address = 127.0.0.3/32' in result['configText'])

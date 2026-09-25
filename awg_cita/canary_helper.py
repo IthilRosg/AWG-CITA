@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import fcntl
+import base64
+import hashlib
 import ipaddress
 import json
 import os
@@ -24,6 +26,7 @@ RESTART = ('/usr/bin/systemctl', 'restart', 'awg-canary0.service')
 _ID = re.compile(r'peer-[0-9a-f]{16}\Z')
 _ENV = {'PATH': '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C', 'LC_ALL': 'C'}
 PROTECTED_PROFILE_FILE = Path('/etc/awg-cita/protected-peer.json')
+CLIENT_CONFIGS = Path('/var/lib/awg-cita/client-configs')
 
 
 def _root_regular(fd: int) -> os.stat_result:
@@ -226,6 +229,69 @@ def _server_public() -> str:
     return _awg_key((AWG, 'show', 'awg-canary0', 'public-key'))
 
 
+def _config_directory() -> None:
+    parent = CLIENT_CONFIGS.parent
+    if not parent.exists():
+        parent.mkdir(mode=0o700)
+    info = os.lstat(parent)
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077:
+        raise ValueError('unsafe client config parent')
+    CLIENT_CONFIGS.mkdir(mode=0o700, exist_ok=True)
+    info = os.lstat(CLIENT_CONFIGS)
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077:
+        raise ValueError('unsafe client config directory')
+
+
+def _config_path(client_id: str) -> Path:
+    if not _ID.fullmatch(client_id):
+        raise ValueError('invalid client id')
+    _config_directory()
+    return CLIENT_CONFIGS / (client_id + '.conf')
+
+
+def _store_client_config(client_id: str, config_text: str) -> None:
+    if not isinstance(config_text, str) or not 1 <= len(config_text) <= 2400:
+        raise ValueError('invalid client configuration')
+    path = _config_path(client_id)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        _write_all(fd, config_text.encode('ascii'))
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
+    directory = os.open(CLIENT_CONFIGS, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def _load_client_config(client_id: str, controller: CanaryPeerController) -> dict[str, object]:
+    client = next((record for record in controller.list_clients() if record['id'] == client_id), None)
+    if client is None or not any('peer-' + hashlib.sha256(base64.b64decode(key)).hexdigest()[:16] == client_id
+                                 for key in controller._mutable_keys):
+        raise ValueError('peer not authorized')
+    fd = os.open(_config_path(client_id), os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        _root_regular(fd)
+        raw = os.read(fd, 2401)
+    finally:
+        os.close(fd)
+    if not 1 <= len(raw) <= 2400:
+        raise ValueError('invalid stored client configuration')
+    config_text = raw.decode('ascii')
+    fields = dict(line.split(' = ', 1) for line in config_text.splitlines() if ' = ' in line)
+    private = _valid_key(fields['PrivateKey'].encode('ascii'))
+    public = _awg_key((AWG, 'pubkey'), private)
+    if ('peer-' + hashlib.sha256(base64.b64decode(public)).hexdigest()[:16] != client_id or
+            fields.get('PublicKey') != _server_public()):
+        raise ValueError('stored client configuration mismatch')
+    import segno
+    qr_uri = segno.make_qr(config_text).png_data_uri(scale=4)
+    return {'schema_version': 1, 'client': client, 'configText': config_text,
+            'qrDataUri': qr_uri}
+
+
 def _read_create_request() -> dict[str, object]:
     import select
     fd = sys.stdin.fileno()
@@ -257,7 +323,7 @@ def _read_create_request() -> dict[str, object]:
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     if os.geteuid() != 0 or not ((len(args) == 1 and args[0] == 'list') or
-                                  (len(args) == 2 and args[0] in {'disable', 'enable', 'delete'} and _ID.fullmatch(args[1])) or
+                                  (len(args) == 2 and args[0] in {'disable', 'enable', 'delete', 'config'} and _ID.fullmatch(args[1])) or
                                   (len(args) == 1 and args[0] == 'create')):
         print('invalid canary operation', file=sys.stderr)
         return 64
@@ -268,9 +334,16 @@ def main(argv: list[str] | None = None) -> int:
             if args[0] == 'list':
                 result = {'schema_version': 1, 'clients': controller.list_clients()}
             elif args[0] == 'create':
-                result = controller.create(request['name'], request['tags'], request['idempotencyKey'], _keypair, _server_public)
+                result = controller.create(request['name'], request['tags'], request['idempotencyKey'],
+                                           _keypair, _server_public, _store_client_config)
+            elif args[0] == 'config':
+                result = _load_client_config(args[1], controller)
             else:
                 value = controller.mutate(args[0], args[1])
+                if args[0] == 'delete':
+                    path = _config_path(args[1])
+                    if path.exists():
+                        path.unlink()
                 result = {'schema_version': 1, **({'id': args[1], 'deleted': True} if args[0] == 'delete' else {'client': value})}
         print(json.dumps(result, separators=(',', ':')))
         return 0

@@ -226,7 +226,7 @@ class ApiTests(unittest.TestCase):
             body = response.read().decode()
             self.assertEqual(response.status, 200)
             self.assertEqual(response.getheader("X-Frame-Options"), "DENY")
-            self.assertEqual(response.getheader("Content-Security-Policy"), "default-src 'self'; script-src 'self'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+            self.assertEqual(response.getheader("Content-Security-Policy"), "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
             self.assertIn('"interface":"awg0"', body)
             self.assertNotIn("fixture-private", body)
             self.assertNotIn("fixture-public", body)

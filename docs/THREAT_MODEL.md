@@ -11,9 +11,10 @@ The server private key, generated client private keys, peer public keys, raw AWG
 dumps, peer routes, endpoints, persistent AWG configuration, root-owned profile,
 proxy credentials, session cookies and CSRF tokens remain within their intended
 trust boundaries. The browser receives bounded operational metadata and opaque
-client IDs for the authenticated operator. A successful create response is the
-single exception: it includes a client configuration and QR payload for one-time
-delivery. Neither is included in status/history or mutation audit records.
+client IDs for the authenticated operator. Create and authenticated configuration
+retrieval responses include the client's private configuration and QR payload.
+The root-only configuration store retains these secrets for later retrieval.
+Neither is included in status/history or mutation audit records.
 
 The client ID is derived from a public-key hash. It is pseudonymous metadata,
 not an authorization token and not a substitute for checking the protected

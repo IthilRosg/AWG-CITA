@@ -92,6 +92,21 @@ class CanaryHttpTests(unittest.TestCase):
         self.assertEqual(self.request('GET', f'/api/clients/{PEER_ID}/disable', headers={'Cookie': cookie})[0], 404)
         self.assertEqual(json.loads(self.request('GET', '/api/clients', headers={'Cookie': cookie})[2])['clients'][0]['status'], 'NEVER')
 
+    def test_configuration_requires_session_and_is_not_cached(self):
+        path = f'/api/clients/{PEER_ID}/config'
+        self.assertEqual(self.request('GET', path)[0], 401)
+        _, headers, _ = self.request('GET', '/')
+        cookie = headers['Set-Cookie'].split(';', 1)[0]
+        config = '[Interface]\nPrivateKey = SYNTHETIC-ONLY\n'
+        self.server.RequestHandlerClass.lifecycle_service.adapter.get_configuration = lambda _id: {
+            'schema_version': 1, 'client': RECORD, 'configText': config,
+            'qrDataUri': 'data:image/png;base64,c3ludGhldGlj'}
+        status, headers, body = self.request('GET', path, headers={'Cookie': cookie})
+        self.assertEqual(status, 200)
+        self.assertEqual(headers['Cache-Control'], 'no-store')
+        self.assertEqual(json.loads(body)['configText'], config)
+        self.assertEqual(self.request('GET', path + '?copy=1', headers={'Cookie': cookie})[0], 404)
+
     def test_identity_and_action_audit_fail_closed(self):
         class ActionAudit:
             def __init__(self):
