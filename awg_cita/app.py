@@ -476,6 +476,26 @@ class _Handler(BaseHTTPRequestHandler):
         if match is None and not create:
             self._json(404, {'error_code': 'not_found'})
             return
+        kinds = self.headers.get_all('Content-Type')
+        lengths = self.headers.get_all('Content-Length')
+        if kinds != ['application/json']:
+            self._json(415, {'error_code': 'unsupported_media_type'})
+            return
+        if (lengths is None or len(lengths) != 1 or not lengths[0].isdigit() or
+                not 1 <= int(lengths[0]) <= 2048 or self.headers.get('Transfer-Encoding')):
+            self._json(400, {'error_code': 'invalid_request'})
+            return
+        try:
+            self.connection.settimeout(10)
+            body = self.rfile.read(int(lengths[0]))
+        except (OSError, TimeoutError):
+            body = b''
+        if len(body) != int(lengths[0]):
+            self.close_connection = True
+            self._json(400, {'error_code': 'invalid_request'})
+            return
+        # The relay has already bounded and forwarded this body. Consume it before
+        # an auth rejection so the Unix backend cannot close during proxy send().
         csrf = self._session_token()
         if csrf is None:
             self._json(401, {'error_code': 'unauthorized'})
@@ -487,15 +507,6 @@ class _Handler(BaseHTTPRequestHandler):
                 self.headers.get('Sec-Fetch-Site', 'same-origin') != 'same-origin'):
             self._json(403, {'error_code': 'forbidden'})
             return
-        kinds = self.headers.get_all('Content-Type')
-        lengths = self.headers.get_all('Content-Length')
-        if kinds != ['application/json']:
-            self._json(415, {'error_code': 'unsupported_media_type'})
-            return
-        if (lengths is None or len(lengths) != 1 or not lengths[0].isdigit() or
-                not 1 <= int(lengths[0]) <= 2048 or self.headers.get('Transfer-Encoding')):
-            self._json(400, {'error_code': 'invalid_request'})
-            return
         def unique_pairs(pairs):
             value = {}
             for key, item in pairs:
@@ -505,7 +516,7 @@ class _Handler(BaseHTTPRequestHandler):
             return value
 
         try:
-            payload = json.loads(self.rfile.read(int(lengths[0])), object_pairs_hook=unique_pairs)
+            payload = json.loads(body, object_pairs_hook=unique_pairs)
             operation = 'create' if create else match.group(2)
             client_id = '' if create else match.group(1)
             keys = ({'name', 'tags', 'idempotencyKey', 'acknowledged'} if create else
