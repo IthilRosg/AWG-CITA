@@ -4,11 +4,11 @@ A security-first, self-hosted operator console for **AmneziaWG**.
 
 ## Status
 
-Version 0.1.0 provides interface state, safe
+Version 0.1.2 provides interface state, safe
 peer metadata, traffic counters, a client dossier, bounded in-memory status
 history and a localized operator UI. It also contains a canary-only peer
-lifecycle candidate with create, enable, disable, delete and one-time
-configuration delivery on the explicitly enabled canary interface.
+lifecycle candidate with create, enable, disable, delete and repeat
+configuration retrieval on the explicitly enabled canary interface.
 
 ## Product boundary
 
@@ -21,8 +21,8 @@ privileged shell access. It is designed around a narrow, allowlisted data model:
   must be passed explicitly through `allowed_hosts` when creating the server;
 - read-only status and history omit keys, endpoints, client IDs, raw dumps and
   configuration payloads; authenticated action mode uses opaque client IDs and
-  returns a private configuration only in the one-time create response;
-- controlled actions require explicit policy, confirmation, audit and rollback
+  returns a private configuration only to the authenticated operator;
+- controlled actions require explicit policy, audit and rollback
   gates.
 
 ## Planned milestones

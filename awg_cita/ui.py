@@ -112,7 +112,7 @@ INDEX_HTML = """<!doctype html>
             </dl>
             <div id="preview-result-boundary" class="preview-boundary" data-i18n="previewNoPeerCreated">NO PEER CREATED · KEYS / CONFIG / QR NOT GENERATED</div>
             <div id="create-real-result" hidden>
-              <p id="create-one-time-warning" class="preview-boundary preview-boundary-danger" role="alert">Private configuration is shown only once. Save it now; it cannot be recovered.</p>
+              <p id="create-one-time-warning" class="preview-boundary preview-boundary-danger" role="alert">Private configuration is available in the client menu. Use AmneziaWG 3.1.</p>
               <label class="form-field" for="create-config-text"><span>Configuration · private</span>
                 <textarea id="create-config-text" readonly spellcheck="false" autocomplete="off" rows="9"></textarea>
               </label>

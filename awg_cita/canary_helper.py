@@ -192,7 +192,8 @@ def _controller() -> CanaryPeerController:
 
 def _awg_key(argv: tuple[str, ...], input_key: str | None = None) -> str:
     """Run one fixed AWG key command, never exposing its output to errors."""
-    if argv not in ((AWG, 'genkey'), (AWG, 'pubkey'), (AWG, 'show', 'awg-canary0', 'public-key')):
+    if argv not in ((AWG, 'genkey'), (AWG, 'pubkey'), (AWG, 'show', 'awg-canary0', 'public-key'),
+                    (AWG, 'show', 'awg-canary0', 'header-protection-key')):
         raise ValueError('invalid key operation')
     process = subprocess.Popen(argv, stdin=subprocess.PIPE if input_key is not None else subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=_ENV)
@@ -227,6 +228,10 @@ def _keypair() -> tuple[str, str]:
 
 def _server_public() -> str:
     return _awg_key((AWG, 'show', 'awg-canary0', 'public-key'))
+
+
+def _runtime_header_protection() -> str:
+    return _awg_key((AWG, 'show', 'awg-canary0', 'header-protection-key'))
 
 
 def _config_directory() -> None:
@@ -281,6 +286,13 @@ def _load_client_config(client_id: str, controller: CanaryPeerController) -> dic
         raise ValueError('invalid stored client configuration')
     config_text = raw.decode('ascii')
     fields = dict(line.split(' = ', 1) for line in config_text.splitlines() if ' = ' in line)
+    server_interface = _read_protected_config().split(b'\n[Peer]\n', 1)[0].decode('ascii')
+    server_fields = dict(line.split(' = ', 1) for line in server_interface.splitlines() if ' = ' in line)
+    for name in ('S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4', 'HeaderProtectionKey'):
+        if fields.get(name) != server_fields.get(name):
+            raise ValueError('stored client obfuscation mismatch')
+    if server_fields.get('HeaderProtectionKey') and _runtime_header_protection() != server_fields['HeaderProtectionKey']:
+        raise ValueError('canary header protection differs from runtime')
     private = _valid_key(fields['PrivateKey'].encode('ascii'))
     public = _awg_key((AWG, 'pubkey'), private)
     if ('peer-' + hashlib.sha256(base64.b64decode(public)).hexdigest()[:16] != client_id or
@@ -335,7 +347,8 @@ def main(argv: list[str] | None = None) -> int:
                 result = {'schema_version': 1, 'clients': controller.list_clients()}
             elif args[0] == 'create':
                 result = controller.create(request['name'], request['tags'], request['idempotencyKey'],
-                                           _keypair, _server_public, _store_client_config)
+                                           _keypair, _server_public, _store_client_config,
+                                           _runtime_header_protection)
             elif args[0] == 'config':
                 result = _load_client_config(args[1], controller)
             else:

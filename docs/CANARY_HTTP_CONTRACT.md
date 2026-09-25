@@ -1,4 +1,4 @@
-# Canary HTTP contract (0.1.1)
+# Canary HTTP contract (0.1.2)
 
 This contract describes the current action-mode implementation. It is enabled
 only with `--canary-actions`, a private Unix application socket and a matching
