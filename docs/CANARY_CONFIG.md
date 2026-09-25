@@ -37,6 +37,18 @@ reject a missing or different identifier. The audit file must be owned by the
 service account and mode 0600; startup refuses an unmatched prior intent until
 an operator reconciles the peer state.
 
+Client configurations are retained for later viewing, download, and QR
+generation in `/var/lib/awg-cita/client-configs`. Both directories must be
+root owned with mode 0700 and each `.conf` must have mode 0600. The fixed root
+helper alone reads this directory. The application returns a configuration only
+to an authenticated operator session and sends `Cache-Control: no-store`.
+The server backup policy must include this directory, because loss of a
+client private key makes the existing peer configuration unrecoverable.
+Configurations created before version 0.1.1 are not in this store; import the
+operator's saved `.conf` after verifying that its derived public key matches
+the existing peer. Delete removes the stored configuration for that peer.
+Use a client that supports AmneziaWG 3.1 for this server profile.
+
 The private relay socket uses a dedicated `awg-cita-relay` group. Run the
 relay as `awg-manager` with that group, create its `/run/awg-cita-relay`
 directory as `awg-manager:awg-cita-relay` mode 0750, and grant the Caddy

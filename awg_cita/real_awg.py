@@ -233,8 +233,9 @@ class CanaryPeerController:
                 self._sync_runtime()
 
     def create(self, name: str, tags: list[str], nonce: str,
-               keypair: Callable[[], tuple[str, str]], server_public: Callable[[], str]) -> dict[str, Any]:
-        """Prepare the complete one-time artifact before changing durable state."""
+               keypair: Callable[[], tuple[str, str]], server_public: Callable[[], str],
+               save_config: Callable[[str, str], None] | None = None) -> dict[str, Any]:
+        """Prepare the complete client artifact before changing durable state."""
         import json as _json
         from .lifecycle import LifecycleService, _IDEMPOTENCY_RE
         LifecycleService._validate_name(name)
@@ -345,8 +346,10 @@ class CanaryPeerController:
             created = next((entry for entry in after if entry['id'] == client_id), None)
             if created is None or created['status'] == 'DISABLED' or {row['id'] for row in after} != {row['id'] for row in before} | {client_id}:
                 raise ValueError('canary creation readback failed')
+            if save_config is not None:
+                save_config(client_id, config_text)
             return {'schema_version': 1, 'client': created, 'configText': config_text,
-                    'qrDataUri': qr_uri, 'oneTime': True}
+                    'qrDataUri': qr_uri, 'oneTime': False}
         except Exception:
             self._rollback_if_changed(source, target)
             raise
@@ -401,7 +404,7 @@ class RealAwgLifecycleAdapter:
 
     @classmethod
     def _invoke(cls, operation: str, client_id: str | dict[str, Any] | None) -> dict[str, Any]:
-        if operation not in {'list', 'enable', 'disable', 'delete', 'create'}:
+        if operation not in {'list', 'enable', 'disable', 'delete', 'create', 'config'}:
             raise LifecycleError('invalid_request')
         if operation == 'create':
             if (not isinstance(client_id, dict) or set(client_id) != {'name', 'tags', 'idempotencyKey'} or
@@ -422,7 +425,7 @@ class RealAwgLifecycleAdapter:
             out, err = AwgReader._run(argv, ACTION_HELPER_TIMEOUT)
         else:
             out, err = AwgReader._run(argv, 15)
-        if err or len(out.encode('utf-8')) > (131072 if operation == 'create' else 65536):
+        if err or len(out.encode('utf-8')) > (131072 if operation in {'create', 'config'} else 65536):
             raise LifecycleError('awg_command_failed')
 
         def unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -485,7 +488,7 @@ class RealAwgLifecycleAdapter:
         request = {'name': name, 'tags': tags, 'idempotencyKey': nonce}
         value = self._helper('create', request)
         if (not isinstance(value, dict) or set(value) != {'schema_version', 'client', 'configText', 'qrDataUri', 'oneTime'} or
-            type(value['schema_version']) is not int or value['schema_version'] != 1 or value['oneTime'] is not True or
+            type(value['schema_version']) is not int or value['schema_version'] != 1 or value['oneTime'] is not False or
             not isinstance(value['configText'], str) or not isinstance(value['qrDataUri'], str) or
             len(value['configText']) > 2400 or len(value['qrDataUri']) > 65536):
             raise LifecycleError('awg_command_failed')
@@ -497,3 +500,17 @@ class RealAwgLifecycleAdapter:
 
     def generate_configuration_preview(self, _client_id: str) -> None:
         raise LifecycleError('invalid_state')
+
+    def get_configuration(self, client_id: str) -> dict[str, Any]:
+        if not isinstance(client_id, str) or not re.fullmatch(r'peer-[0-9a-f]{16}', client_id):
+            raise LifecycleError('invalid_request')
+        value = self._helper('config', client_id)
+        if (not isinstance(value, dict) or set(value) != {'schema_version', 'client', 'configText', 'qrDataUri'} or
+                type(value['schema_version']) is not int or value['schema_version'] != 1 or
+                not isinstance(value['configText'], str) or not 1 <= len(value['configText']) <= 2400 or
+                not isinstance(value['qrDataUri'], str) or not value['qrDataUri'].startswith('data:image/png;base64,') or
+                len(value['qrDataUri']) > 65536):
+            raise LifecycleError('awg_command_failed')
+        if self._record(value['client'])['id'] != client_id:
+            raise LifecycleError('awg_command_failed')
+        return value

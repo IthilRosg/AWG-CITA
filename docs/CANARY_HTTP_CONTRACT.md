@@ -1,4 +1,4 @@
-# Canary HTTP contract (0.1.0 candidate)
+# Canary HTTP contract (0.1.1)
 
 This contract describes the current action-mode implementation. It is enabled
 only with `--canary-actions`, a private Unix application socket and a matching
@@ -11,14 +11,15 @@ record of the earlier design phase.
 | --- | --- | --- |
 | `GET /` | None | UI with a one-hour application session cookie and CSRF token. |
 | `GET /api/clients` | Session cookie | `{schema_version: 1, clients: [...]}` with at most 64 safe records. |
-| `POST /api/clients` | `name`, `tags`, `idempotencyKey`, `acknowledged: true` | `200` with a safe client record, `configText`, `qrDataUri`, `oneTime: true`. |
+| `GET /api/clients/{peer-id}/config` | Session cookie | `200` with the retained `configText` and `qrDataUri`. |
+| `POST /api/clients` | `name`, `tags`, `idempotencyKey`, `acknowledged: true` | `200` with a safe client record, `configText`, `qrDataUri`, `oneTime: false`. |
 | `POST /api/clients/{peer-id}/enable` | `idempotencyKey` | `200` with canonical client record. |
 | `POST /api/clients/{peer-id}/disable` | `idempotencyKey`, `reason: "operator_requested"` | `200` with canonical client record. |
 | `POST /api/clients/{peer-id}/delete` | `idempotencyKey`, `confirmation: true` | `200` with `{schema_version: 1, id, deleted: true}`. |
 
 Peer IDs in action paths have the form `peer-` followed by sixteen lowercase
 hexadecimal characters. The server does not expose raw public keys. Update and
-configuration-preview routes are not part of the real action API. Read-only
+mock configuration-preview routes are not part of the real action API. Read-only
 `/api/status` and `/api/history` retain their existing contracts.
 
 The authenticated proxy supplies exactly one `X-AWG-Operator` header. The
@@ -31,10 +32,12 @@ The reverse proxy must authenticate before forwarding any route that issues a
 session or reaches the action API. It must not expose the private backend socket.
 
 Responses use `Cache-Control: no-store`. The session cookie is HttpOnly and
-SameSite=Strict, with Secure set for HTTPS operator origins. The create
-configuration and QR are one-time response material; they are not cached for
-retry. If the response is lost after commit, the caller must list clients and
-resolve the orphaned peer without trying to retrieve the secret again.
+SameSite=Strict, with Secure set for HTTPS operator origins. Configurations
+are stored in a root-only directory for repeat retrieval. They are not cached
+in the browser or lifecycle service and are removed when a client is deleted.
+If the create response is lost after commit, the caller can retrieve the
+configuration from the client menu. Old peers require migration of a saved
+configuration before repeat retrieval becomes possible.
 
 ## Errors and limits
 

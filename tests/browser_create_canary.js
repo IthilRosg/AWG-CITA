@@ -57,7 +57,7 @@ async function main() {
           await route.abort('failed');
         } else {
           created = true;
-          await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ schema_version: 1, client, configText: config, qrDataUri: qr, oneTime: true }) });
+          await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ schema_version: 1, client, configText: config, qrDataUri: qr, oneTime: false }) });
         }
       } else {
         gets++;
@@ -65,11 +65,16 @@ async function main() {
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ schema_version: 1, clients: [...(created ? [client] : []), ...(orphanPresent ? [orphan] : [])] }) });
       }
     });
+    await page.route(`**/api/clients/${peerId}/config`, async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        schema_version: 1, client, configText: config, qrDataUri: qr
+      }) });
+    });
     await page.goto(`${url}#clients`);
     await page.waitForFunction(() => document.querySelector('#app')?.getAttribute('aria-busy') === 'false');
     await page.locator('#add-client-button').click();
     assert.match(await page.locator('#preview-dialog-title').textContent(), /создан|creat/i);
-    assert.match(await page.locator('#preview-dialog-copy').textContent(), /одноразов|one.time/i);
+    assert.match(await page.locator('#preview-dialog-copy').textContent(), /AmneziaWG 3\.1/i);
     await page.locator('#preview-name').fill(client.name);
     await page.locator('#preview-tags').fill('field');
     assert.equal(await page.locator('#preview-ack, #preview-step-confirm').count(), 0);
@@ -84,7 +89,7 @@ async function main() {
     assert.equal(await page.locator('#create-qr').getAttribute('role'), 'img');
     assert.equal(await page.locator('#create-qr-caption').count(), 1, 'QR compatibility caption missing');
     assert.match(await page.locator('#create-qr-caption').textContent(), /совместим|compatible/i);
-    assert.match(await page.locator('#create-one-time-warning').textContent(), /только сейчас|only now/i);
+    assert.match(await page.locator('#create-one-time-warning').textContent(), /меню клиента|client menu/i);
     const downloadPromise = page.waitForEvent('download');
     await page.locator('#create-config-download').click();
     const download = await downloadPromise;
@@ -96,6 +101,15 @@ async function main() {
     assert.equal(await page.locator('#create-qr').evaluate(c => c.getContext('2d').getImageData(0, 0, 1, 1).data[3]), 0, 'QR pixels retained after close');
     assert.equal(await page.locator('#create-preview-modal').getAttribute('hidden'), '');
     assert.equal(await page.locator('#client-rows [data-client-id="' + peerId + '"]').count(), 1);
+    await page.locator(`[data-action-menu-toggle="${peerId}"]`).click();
+    await page.locator('#client-action-config').click();
+    await page.waitForFunction(() => document.querySelector('#config-preview-text')?.textContent.includes('SYNTHETIC-TEST-ONLY'));
+    assert.equal(await page.locator('#config-preview-download').isDisabled(), false);
+    assert.equal(await page.locator('#config-preview-qr img').count(), 1);
+    const repeatedDownload = page.waitForEvent('download');
+    await page.locator('#config-preview-download').click();
+    assert.equal(await (await require('node:fs/promises').readFile(await (await repeatedDownload).path(), 'utf8')), config);
+    await page.locator('#config-preview-close').click();
     assert(gets >= 2, 'no list read-back after create');
     const leakage = await page.evaluate(() => [document.documentElement.outerHTML, JSON.stringify(localStorage), JSON.stringify(sessionStorage)].join('\n'));
     assert(!leakage.includes('SYNTHETIC-TEST-ONLY') && !leakage.includes(qr), 'secret retained in DOM or storage');
@@ -103,53 +117,38 @@ async function main() {
     assert(!errors.some(e => e.includes('SYNTHETIC-TEST-ONLY') || e.includes(qr)), `secret logged: ${errors.map(e => e.replaceAll(config, '[CONFIG]').replaceAll(qr, '[QR]'))}`);
     assert.deepEqual(errors, []);
 
-    // A committed POST with a lost response must not allow another nonce/Create.
+    // A lost response may leave a peer behind, but Create must stay available.
     loseResponse = true;
     await page.locator('#add-client-button').click();
     await page.locator('#preview-name').fill('Lost Response');
     await page.locator('#preview-tags').fill('field');
     await page.locator('#preview-submit').evaluate(button => button.click());
-    await page.waitForFunction(() => document.querySelector('#create-reconcile')?.textContent.includes('nonce:'));
-    assert.equal(await page.locator('#create-reconcile-check').isDisabled(), true, 'cannot resolve while POST is in flight');
+    await page.waitForFunction(() => document.querySelector('#preview-submit')?.disabled === true);
     releaseLostResponse();
-    await page.waitForFunction(() => document.querySelector('#create-reconcile')?.textContent.includes('peer-orphan123'));
-    assert.equal(await page.locator('#create-reconcile').isVisible(), true, 'reconciliation must be visible on create form');
+    await page.waitForFunction(() => document.querySelector('#preview-submit')?.disabled === false);
+    assert.equal(await page.locator('#create-reconcile').count(), 0);
     await page.screenshot({ path: `${artifacts}/lost-response-no-secrets.png` });
     assert.equal(posts, 2);
-    assert.match(await page.locator('#create-reconcile').textContent(), new RegExp(lostNonce));
-    assert.match(await page.locator('#create-reconcile').textContent(), /private key|приватн/i);
     assert.equal(await page.locator('#create-config-text').inputValue(), '');
-    await page.locator('#preview-submit').evaluate(button => button.click());
-    assert.equal(posts, 2, 'ambiguous outcome must not submit a new nonce');
     await page.locator('#preview-close').click();
     await page.locator('#add-client-button').click();
-    assert.equal(await page.locator('#preview-submit').isDisabled(), true, 'closing cannot clear ambiguity');
-    assert.match(await page.locator('#create-reconcile').textContent(), new RegExp(lostNonce));
+    assert.equal(await page.locator('#preview-submit').isDisabled(), false);
     await page.reload();
     await page.waitForFunction(() => document.querySelector('#app')?.getAttribute('aria-busy') === 'false');
     await page.locator('#add-client-button').click();
-    assert.equal(await page.locator('#preview-submit').isDisabled(), true, 'reload cannot clear ambiguity');
-    assert.match(await page.locator('#create-reconcile').textContent(), new RegExp(lostNonce));
+    assert.equal(await page.locator('#preview-submit').isDisabled(), false);
     const secondTab = await context.newPage();
     await secondTab.goto(`${url}#clients`);
     await secondTab.waitForFunction(() => document.querySelector('#app')?.getAttribute('aria-busy') === 'false');
     await secondTab.locator('#add-client-button').click();
-    assert.match(await secondTab.locator('#create-reconcile').textContent(), new RegExp(lostNonce), 'another tab must retain the attempted nonce');
-    assert.equal(await secondTab.locator('#preview-submit').isDisabled(), true);
+    assert.equal(await secondTab.locator('#preview-submit').isDisabled(), false);
     await secondTab.close();
-    await page.locator('#create-reconcile-check').click();
-    assert.equal(await page.locator('#create-reconcile-resolve').count(), 0, 'no extra confirmation is shown');
-    orphanPresent = false; // Simulate explicit external operator cleanup, never a UI auto-delete.
-    await page.locator('#create-reconcile-check').click();
-    await page.waitForFunction(() => document.querySelector('#create-reconcile-check')?.textContent.includes('Снять блокировку'));
-    await page.locator('#create-reconcile-check').click();
-    await page.waitForFunction(() => document.querySelector('#create-reconcile')?.hidden === true);
     assert.equal(posts, 2);
     const afterLoss = await page.evaluate(() => [document.documentElement.outerHTML, JSON.stringify(localStorage), JSON.stringify(sessionStorage)].join('\n'));
     assert(!afterLoss.includes('SYNTHETIC-TEST-ONLY') && !afterLoss.includes(qr), 'secret leaked on ambiguity');
     assert(!errors.some(e => e.includes('SYNTHETIC-TEST-ONLY') || e.includes(qr)), 'secret logged on ambiguity');
     assert(errors.every(e => /net::ERR_FAILED/.test(e)), `unexpected console/page errors: ${errors}`);
-    console.log('CANARY_CREATE=PASS request=1 readback=PASS one_time=PASS cleanup=PASS lost_response=BLOCKED orphan_resolution=PASS');
+    console.log('CANARY_CREATE=PASS request=1 readback=PASS secret_cleanup=PASS lost_response=UNBLOCKED');
   } finally { if (browser) await browser.close(); child.kill(); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

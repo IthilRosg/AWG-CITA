@@ -43,6 +43,7 @@ _BRACKETED_HOST_RE = re.compile(r"^\[([0-9A-Fa-f:.]+)\](?::([0-9]{1,5}))?$")
 _PLAIN_HOST_RE = re.compile(r"^([A-Za-z0-9.-]+)(?::([0-9]{1,5}))?$")
 _DNS_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 _CANARY_ROUTE_RE = re.compile(r"^/api/clients/(peer-[0-9a-f]{16})/(disable|enable|delete)$")
+_CANARY_CONFIG_RE = re.compile(r"^/api/clients/(peer-[0-9a-f]{16})/config$")
 _OPERATOR_ID_RE = re.compile(r"[A-Za-z0-9_.@-]{1,64}\Z")
 MAX_AWG_DUMP_BYTES = 1_048_576
 SNAPSHOT_CACHE_TTL_SECONDS = 2.0
@@ -278,7 +279,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
         if allow:
             self.send_header("Allow", allow)
         if cookie:
@@ -427,6 +428,16 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             try:
                 self._json(200, {'schema_version': 1, 'clients': self.lifecycle_service.list_clients()})
+            except LifecycleError as error:
+                self._json(self._lifecycle_status(error), {'error_code': error.code})
+            return
+        config_match = _CANARY_CONFIG_RE.fullmatch(self.path)
+        if config_match is not None and self.lifecycle_service is not None:
+            if self._session_token() is None:
+                self._json(401, {'error_code': 'unauthorized'})
+                return
+            try:
+                self._json(200, self.lifecycle_service.get_configuration(config_match.group(1)))
             except LifecycleError as error:
                 self._json(self._lifecycle_status(error), {'error_code': error.code})
             return
