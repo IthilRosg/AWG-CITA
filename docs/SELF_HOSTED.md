@@ -35,9 +35,9 @@ its console entry point. The following names are examples only; replace the
 release path, binary path and interface with local audited values.
 
 ```sh
-sha256sum -c /srv/releases/awg_cita-0.1.0a0-py3-none-any.whl.sha256
+sha256sum -c /srv/releases/awg_cita-0.1.0-py3-none-any.whl.sha256
 python3 -m venv /opt/awg-cita/venv
-/opt/awg-cita/venv/bin/pip install --no-index /srv/releases/awg_cita-0.1.0a0-py3-none-any.whl
+/opt/awg-cita/venv/bin/pip install --no-index /srv/releases/awg_cita-0.1.0-py3-none-any.whl
 /opt/awg-cita/venv/bin/awg-cita \
   --binary /usr/local/bin/awg \
   --interface awg0 \

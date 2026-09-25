@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "awg-cita"
-version = "0.1.0a4"
+version = "0.1.0"
 description = "Security-first operator console primitives for AmneziaWG"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["segno==1.6.6"]
 license = {text = "Apache-2.0"}
 classifiers = [
-  "Development Status :: 2 - Pre-Alpha",
+  "Development Status :: 3 - Alpha",
   "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",

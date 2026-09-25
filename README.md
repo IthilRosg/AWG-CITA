@@ -4,12 +4,12 @@ A security-first, self-hosted operator console for **AmneziaWG**.
 
 ## Status
 
-Public pre-alpha. The current development tree provides interface state, safe
+The 0.1.0 release candidate provides interface state, safe
 peer metadata, traffic counters, a client dossier, bounded in-memory status
 history and a localized operator UI. It also contains a canary-only peer
 lifecycle candidate with create, enable, disable, delete and one-time
-configuration delivery. That candidate is under release review and is not yet
-part of a published 0.1.0 release.
+configuration delivery. The candidate is under final release review; 0.1.0 has
+not yet been published.
 
 ## Product boundary
 

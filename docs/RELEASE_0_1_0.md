@@ -69,3 +69,7 @@ wheel.
 
 Add a dedicated settings menu for panel and AWG configuration. This is a
 follow-up feature and does not expand the current release gate.
+
+Schedule separate maintenance for rotation of the unrelated remote-support
+server identity. Its private key permissions have been restricted; rotating it
+requires coordinating client trust updates and is outside this release.
