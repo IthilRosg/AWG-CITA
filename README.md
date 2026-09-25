@@ -4,12 +4,11 @@ A security-first, self-hosted operator console for **AmneziaWG**.
 
 ## Status
 
-The 0.1.0 release candidate provides interface state, safe
+Version 0.1.0 provides interface state, safe
 peer metadata, traffic counters, a client dossier, bounded in-memory status
 history and a localized operator UI. It also contains a canary-only peer
 lifecycle candidate with create, enable, disable, delete and one-time
-configuration delivery. The candidate is under final release review; 0.1.0 has
-not yet been published.
+configuration delivery on the explicitly enabled canary interface.
 
 ## Product boundary
 
@@ -60,8 +59,7 @@ This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
 This describes the original read-only mode. The canary lifecycle candidate adds
 private, authenticated same-origin routes when explicitly enabled; its release
 contract is documented in [CANARY_HTTP_CONTRACT.md](docs/CANARY_HTTP_CONTRACT.md)
-and its security boundary in [THREAT_MODEL.md](docs/THREAT_MODEL.md). Action-mode
-release gates remain open.
+and its security boundary in [THREAT_MODEL.md](docs/THREAT_MODEL.md).
 
 - `GET /` serves the operator UI; `GET /api/status` serves the safe telemetry.
 - `GET /api/history` serves a bounded, in-process projection of prior safe-status

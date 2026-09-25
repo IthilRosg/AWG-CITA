@@ -68,13 +68,17 @@ has a separate, durable JSONL intent/result log tied to one configured operator
 account. It fails closed on write failure or an unmatched intent at startup.
 The account ID cannot distinguish people who share credentials.
 
-Before action mode can be released, verify the exact installed revision and
-live authenticated route, then complete final rollback and package review.
-The installed proxy block was tested in isolation for identity replacement,
-and a temporary peer completed create/disable/enable/delete with matched,
-secret-safe audit pairs and protected-peer readback. An end-to-end identity
-check of the live authenticated route remains open. Linux CI exercises the
-privileged helper and failure paths against synthetic files.
+The installed proxy block was tested in isolation for identity replacement.
+The live public route rejects unauthenticated requests carrying a forged
+operator header, and the installed Caddyfile validates with the same header
+replacement rule. An authenticated browser loaded the installed panel. These
+checks form the reviewed proxy-identity evidence; an authenticated forged-header
+request through the live public route was not performed. A temporary peer
+completed create/disable/enable/delete with matched, secret-safe audit pairs
+and protected-peer readback. The final package was installed from a verified
+wheel, and an isolated rollback switch was rehearsed; an earlier cutover also
+exercised a live rollback. Linux CI exercises the privileged helper and failure
+paths against synthetic files.
 
 ## Release requirements
 

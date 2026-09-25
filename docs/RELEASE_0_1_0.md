@@ -60,10 +60,21 @@ wheel.
 - Reachable Git history and the intended public file set were scanned for
   embedded credentials, private-key files, host-specific markers and large or
   binary artifacts. Flagged assignments were synthetic test fixtures. The
-  server's protected configuration and backup remain private. Live public
-  authenticated-route identity verification, live rollback review,
-  package/version review and server cleanup remain open gates before
-  publishing `0.1.0`.
+  server's protected configuration and backup remain private.
+- The final `0.1.0` wheel was installed from a versioned release, with its
+  digest, metadata and assets checked on the operator host. Runtime package
+  files match the accepted canary build. CI passed for the final candidate on
+  Python 3.11–3.13 and the browser suite.
+
+The proxy identity gate uses the reviewed equivalent in the
+[threat model](THREAT_MODEL.md): the installed Caddy block passed an isolated
+authenticated-header replacement test, the live config validates with that
+rule, the live route rejects forged unauthenticated requests, and the operator
+panel loaded in an authenticated browser. A live authenticated forged-header
+request was not performed. Rollback evidence includes a prior live rollback,
+an isolated current-release symlink rehearsal and a guarded final-wheel cutover.
+Inert server files and older releases remain until their rollback window ends;
+unrelated remote-support key rotation is scheduled separately.
 
 ## After 0.1.0
 
