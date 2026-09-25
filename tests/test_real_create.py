@@ -40,6 +40,7 @@ class RelayCreateTests(unittest.TestCase):
         from pathlib import Path
         rule = Path('scripts/awg-cita-canary.sudoers').read_text(encoding='ascii')
         self.assertIn('/usr/local/sbin/awg-cita-peer create', rule)
+        self.assertIn('/usr/local/sbin/awg-cita-peer config peer-*', rule)
         self.assertNotIn('/usr/local/sbin/awg-cita-peer create *', rule)
         self.assertNotIn('NOPASSWD: ALL', rule)
         wrapper = Path('scripts/awg-cita-peer').read_text(encoding='ascii')
@@ -163,6 +164,30 @@ class ServiceCreateTests(unittest.TestCase):
 
 
 class RealCreateTests(unittest.TestCase):
+    def test_header_protection_is_copied_to_client_and_verified_against_runtime(self):
+        protected = PROFILE.replace(b'H4 = 1004\n',
+                                    b'H4 = 1004\nHeaderProtectionKey = ' + CLIENT_PRIVATE.encode() + b'\n')
+        state = {'config': protected, 'runtime': set(PersistentCanaryConfig(protected).peers())}
+        def write(before, after):
+            self.assertEqual(state['config'], before)
+            state['config'] = after
+        def sync():
+            state['runtime'] = {key for key, status in PersistentCanaryConfig(state['config']).peers().items()
+                                if status == 'enabled'}
+        controller = CanaryPeerController(lambda: state['config'], lambda: dump(state),
+                                          write_config=write, sync_runtime=sync)
+        with self.assertRaisesRegex(ValueError, 'header protection differs'):
+            controller.create('New Device', [], 'request-header-01',
+                              lambda: (CLIENT_PRIVATE, CLIENT_PUBLIC), lambda: SERVER_PUBLIC,
+                              runtime_header_protection=lambda: SERVER_PUBLIC)
+        self.assertEqual(state['config'], protected)
+        with patch('segno.make_qr') as qr:
+            qr.return_value.png_data_uri.return_value = 'data:image/png;base64,Zml4dHVyZQ=='
+            result = controller.create('New Device', [], 'request-header-02',
+                                       lambda: (CLIENT_PRIVATE, CLIENT_PUBLIC), lambda: SERVER_PUBLIC,
+                                       runtime_header_protection=lambda: CLIENT_PRIVATE)
+        self.assertIn('HeaderProtectionKey = ' + CLIENT_PRIVATE, result['configText'])
+
     def test_create_preserves_repeated_awg_hook_commands(self):
         hooks = b'PostUp = true\nPostUp = true\nPostDown = true\nPostDown = true\n'
         profile = PROFILE.replace(b'ListenPort = 51820\n', b'ListenPort = 51820\n' + hooks)

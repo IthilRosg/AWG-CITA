@@ -1,3 +1,3 @@
 # AWG-CITA service account: fixed canary peer operations only.
-Cmnd_Alias AWG_CITA_CANARY = /usr/local/sbin/awg-cita-peer list, /usr/local/sbin/awg-cita-peer disable peer-*, /usr/local/sbin/awg-cita-peer enable peer-*, /usr/local/sbin/awg-cita-peer delete peer-*, /usr/local/sbin/awg-cita-peer create
+Cmnd_Alias AWG_CITA_CANARY = /usr/local/sbin/awg-cita-peer list, /usr/local/sbin/awg-cita-peer disable peer-*, /usr/local/sbin/awg-cita-peer enable peer-*, /usr/local/sbin/awg-cita-peer delete peer-*, /usr/local/sbin/awg-cita-peer create, /usr/local/sbin/awg-cita-peer config peer-*
 awg-manager ALL=(root) NOPASSWD: AWG_CITA_CANARY

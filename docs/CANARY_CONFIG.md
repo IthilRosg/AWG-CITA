@@ -12,8 +12,8 @@ The JSON object has exactly seven fields:
 | --- | --- |
 | `public_key` | Base64 public key of the protected, pre-existing peer. |
 | `route` | Its exact IPv4 host route in the persistent AWG configuration. |
-| `endpoint_host` | Lowercase DNS name used in one-time client configurations. |
-| `dns_server` | IP address placed in one-time client configurations. |
+| `endpoint_host` | Lowercase DNS name used in client configurations. |
+| `dns_server` | IP address placed in client configurations. |
 | `obfuscation` | Object containing the expected string values for `S1`–`S4` and `H1`–`H4`. |
 | `interface_address` | Exact IPv4 interface address and prefix expected in the AWG configuration. |
 | `listen_port` | Exact port expected in the AWG configuration and runtime dump. |
@@ -48,6 +48,9 @@ Configurations created before version 0.1.1 are not in this store; import the
 operator's saved `.conf` after verifying that its derived public key matches
 the existing peer. Delete removes the stored configuration for that peer.
 Use a client that supports AmneziaWG 3.1 for this server profile.
+When the canary interface has `HeaderProtectionKey`, its value must be copied
+into every client configuration and must equal the running interface value.
+Without it, the server receives handshake packets but does not recognize them.
 
 The private relay socket uses a dedicated `awg-cita-relay` group. Run the
 relay as `awg-manager` with that group, create its `/run/awg-cita-relay`
@@ -64,7 +67,7 @@ the previous release intact for rollback. No service account may write the
 link, a release directory, or any Python module loaded by the root helper.
 The candidate directory must include all declared runtime dependencies, not
 only the `awg_cita` wheel contents. Creation imports `segno` to generate the
-one-time QR code. Before switching `current`, test the actual helper interpreter
+QR code. Before switching `current`, test the actual helper interpreter
 and import path, for example:
 
 ```sh

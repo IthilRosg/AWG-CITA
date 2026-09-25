@@ -234,7 +234,8 @@ class CanaryPeerController:
 
     def create(self, name: str, tags: list[str], nonce: str,
                keypair: Callable[[], tuple[str, str]], server_public: Callable[[], str],
-               save_config: Callable[[str, str], None] | None = None) -> dict[str, Any]:
+               save_config: Callable[[str, str], None] | None = None,
+               runtime_header_protection: Callable[[], str] | None = None) -> dict[str, Any]:
         """Prepare the complete client artifact before changing durable state."""
         import json as _json
         from .lifecycle import LifecycleService, _IDEMPOTENCY_RE
@@ -310,6 +311,12 @@ class CanaryPeerController:
                 extras.append(f'{key} = {value}')
         if present_j and int(fields['Jmin']) > int(fields['Jmax']):
             raise ValueError('unexpected canary obfuscation profile')
+        header_protection = fields.get('HeaderProtectionKey')
+        if header_protection is not None:
+            _valid_key(header_protection.encode('ascii'))
+            if runtime_header_protection is None or runtime_header_protection() != header_protection:
+                raise ValueError('canary header protection differs from runtime')
+            extras.append(f'HeaderProtectionKey = {header_protection}')
         private, public = keypair()
         _valid_key(private.encode('ascii'))
         _valid_key(public.encode('ascii'))
