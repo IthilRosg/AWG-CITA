@@ -243,18 +243,14 @@ async function assertDesktop(page, diagnostics) {
   const initialClientRows = await page.locator('#client-rows .client-row').count();
   await page.locator('#add-client-button').click();
   if (await page.locator('#create-preview-modal').getAttribute('hidden') !== null) throw new Error('Create Client preview modal did not open');
-  await page.locator('#preview-next').click();
+  await page.locator('#preview-submit').click();
   if (await page.locator('#preview-form-error').getAttribute('hidden') !== null) throw new Error('empty preview form did not expose a validation error');
   await page.locator('#preview-name').fill('Kestrel Preview');
   await page.locator('#preview-tags').fill('demo, bad tag');
-  await page.locator('#preview-next').click();
+  await page.locator('#preview-submit').click();
   if (await page.locator('#preview-form-error').getAttribute('hidden') !== null) throw new Error('unsafe preview tag did not expose a validation error');
   await page.locator('#preview-tags').fill('demo, ops');
-  await page.locator('#preview-next').click();
-  if (await page.locator('#preview-step-confirm').getAttribute('hidden') !== null) throw new Error('valid preview metadata did not advance to confirmation');
-  await page.locator('#preview-submit').click();
-  if (await page.locator('#preview-form-error').getAttribute('hidden') !== null) throw new Error('preview acknowledgement was not required');
-  await page.locator('#preview-ack').check();
+  if (await page.locator('#preview-ack, #preview-step-confirm').count()) throw new Error('create still asks for extra confirmation');
   await page.locator('#preview-submit').click();
   await page.waitForFunction(() => document.querySelector('#preview-step-result')?.getAttribute('hidden') === null);
   if ((await page.locator('#preview-result-status').textContent()).trim() !== 'DRY_RUN') throw new Error('preview result did not expose DRY_RUN status');
@@ -313,9 +309,6 @@ async function assertDesktop(page, diagnostics) {
   if ((await page.locator('#dossier-client-name').textContent()).trim() !== 'Atlas Relay Edited') throw new Error('edited client name did not update the dossier');
   await save(page, 'sprint4-edit');
 
-  await openActions(page, 'peer-atlas');
-  await page.locator('#client-actions-menu [data-client-action="disable"]').click();
-  if (await page.locator('#status-client-modal').getAttribute('hidden') !== null) throw new Error('disable confirmation did not open');
   await page.evaluate(() => {
     const adapter = window.__AWG_CITA_TEST_HOOKS__.adapter;
     window.__testOriginalDisableClient = adapter.disableClient.bind(adapter);
@@ -324,12 +317,13 @@ async function assertDesktop(page, diagnostics) {
       window.__testReleaseLifecycleFailure = () => reject(new Error('awg_timeout'));
     });
   });
-  await page.locator('#status-confirm').click();
+  await openActions(page, 'peer-atlas');
+  await page.locator('#client-actions-menu [data-client-action="disable"]').click();
   await page.waitForFunction(() => typeof window.__testReleaseLifecycleFailure === 'function');
-  if (!(await page.locator('#status-confirm').isDisabled())) throw new Error('mock lifecycle operation did not expose its loading state');
+  if (await page.locator('#status-client-modal').count()) throw new Error('disable still asks for confirmation');
+  if (!(await page.evaluate(() => window.__AWG_CITA_TEST_HOOKS__.state.statusClient.submitting))) throw new Error('mock lifecycle operation did not expose its loading state');
   await page.evaluate(() => window.__testReleaseLifecycleFailure());
-  await page.waitForFunction(() => document.querySelector('#status-confirm')?.disabled === false);
-  if (await page.locator('#status-client-modal').getAttribute('hidden') !== null) throw new Error('mock lifecycle error closed the confirmation modal unexpectedly');
+  await page.waitForFunction(() => window.__AWG_CITA_TEST_HOOKS__.state.statusClient.submitting === false);
   if (!(await page.locator('.toast').last().textContent()).includes('Состояние клиента не было изменено.')) throw new Error('mock lifecycle error did not render safe translated feedback');
   if (!(await page.locator('#client-rows .client-row[data-client-id="peer-atlas"] .status-pill').textContent()).includes('ONLINE')) throw new Error('mock lifecycle error changed the visible client state');
   await page.evaluate(() => {
@@ -338,8 +332,9 @@ async function assertDesktop(page, diagnostics) {
     delete window.__testOriginalDisableClient;
     delete window.__testReleaseLifecycleFailure;
   });
-  await page.locator('#status-confirm').click();
-  await page.waitForFunction(() => document.querySelector('#status-client-modal')?.getAttribute('hidden') === '');
+  await openActions(page, 'peer-atlas');
+  await page.locator('#client-actions-menu [data-client-action="disable"]').click();
+  await page.waitForFunction(() => document.querySelector('#client-rows .client-row[data-client-id="peer-atlas"] .status-pill')?.textContent.includes('DISABLED'));
   if (!(await page.locator('#client-rows .client-row[data-client-id="peer-atlas"] .status-pill').textContent()).includes('DISABLED')) throw new Error('disable flow did not update status');
   await page.locator('[data-status-filter="DISABLED"]').click();
   if (await page.locator('#client-rows .client-row').count() !== 2) throw new Error('status filter did not react to the backend disable');
@@ -348,9 +343,7 @@ async function assertDesktop(page, diagnostics) {
   await openActions(page, 'peer-atlas');
   if (await page.locator('#client-actions-menu [data-client-action="enable"]').getAttribute('hidden') !== null) throw new Error('enable action was not exposed for disabled client');
   await page.locator('#client-actions-menu [data-client-action="enable"]').click();
-  if (await page.locator('#status-client-modal').getAttribute('hidden') !== null) throw new Error('enable confirmation did not open');
-  await page.locator('#status-confirm').click();
-  await page.waitForFunction(() => document.querySelector('#status-client-modal')?.getAttribute('hidden') === '');
+  await page.waitForFunction(() => document.querySelector('#client-rows .client-row[data-client-id="peer-atlas"] .status-pill')?.textContent.includes('ONLINE'));
   if (!(await page.locator('#client-rows .client-row[data-client-id="peer-atlas"] .status-pill').textContent()).includes('ONLINE')) throw new Error('enable flow did not restore status');
 
   const previousPreviewState = await page.evaluate(() => {

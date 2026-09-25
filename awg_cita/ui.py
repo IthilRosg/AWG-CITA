@@ -83,10 +83,10 @@ INDEX_HTML = """<!doctype html>
             </div>
             <button id="preview-close" class="icon-button" type="button" data-i18n-label="closePreview" aria-label="Закрыть preview">×</button>
           </div>
-          <p id="preview-dialog-copy" class="modal-copy" data-i18n="previewDialogCopy">Проверка метаданных и подтверждение без создания peer, ключей, конфигурации или QR.</p>
+          <p id="preview-dialog-copy" class="modal-copy" data-i18n="previewDialogCopy">Проверка метаданных без создания peer, ключей, конфигурации или QR.</p>
 
           <div id="preview-step-form" class="preview-step">
-            <div class="preview-step-label" data-i18n="previewStepDetails">Шаг 1 / Метаданные</div>
+            <div class="preview-step-label" data-i18n="previewStepDetails">Данные клиента</div>
             <label class="form-field" for="preview-name">
               <span data-i18n="previewNameLabel">Имя клиента</span>
               <input id="preview-name" type="text" maxlength="48" autocomplete="off" data-i18n-placeholder="previewNamePlaceholder" placeholder="Например, Field Laptop">
@@ -98,18 +98,6 @@ INDEX_HTML = """<!doctype html>
               <small data-i18n="previewTagsHint">До 5 tags через запятую, без секретов и connection data.</small>
             </label>
             <div id="preview-form-error" class="notice notice-error" role="alert" hidden></div>
-          </div>
-
-          <div id="preview-step-confirm" class="preview-step" hidden>
-            <div class="preview-step-label" data-i18n="previewStepConfirm">Шаг 2 / Подтверждение</div>
-            <div class="preview-summary">
-              <div><span data-i18n="previewSummaryName">Имя</span><strong id="preview-confirm-name">—</strong></div>
-              <div><span data-i18n="previewSummaryTags">Tags</span><strong id="preview-confirm-tags">—</strong></div>
-            </div>
-            <label class="acknowledgement-row" for="preview-ack">
-              <input id="preview-ack" type="checkbox">
-              <span data-i18n="previewAckLabel">Я понимаю: это только preview; peer и секретные материалы не создаются.</span>
-            </label>
           </div>
 
           <div id="preview-step-result" class="preview-step" hidden>
@@ -139,9 +127,7 @@ INDEX_HTML = """<!doctype html>
 
           <div class="modal-actions">
             <button id="preview-cancel" class="button button-quiet" type="button" data-i18n="previewCancel">Отмена</button>
-            <button id="preview-back" class="button" type="button" data-i18n="previewBack" hidden>Назад</button>
-            <button id="preview-next" class="button button-primary" type="button" data-i18n="previewNext">Продолжить</button>
-            <button id="preview-submit" class="button button-primary" type="button" data-i18n="previewSubmit" hidden>Подтвердить preview</button>
+            <button id="preview-submit" class="button button-primary" type="button" data-i18n="previewSubmit">Запустить preview</button>
             <button id="preview-done" class="button button-primary" type="button" data-i18n="previewDone" hidden>Готово</button>
           </div>
         </section>
@@ -179,30 +165,6 @@ INDEX_HTML = """<!doctype html>
           <div class="modal-actions">
             <button id="edit-cancel" class="button button-quiet" type="button" data-i18n="cancel">Отмена</button>
             <button id="edit-save" class="button button-primary" type="button" data-i18n="saveChanges">Сохранить изменения</button>
-          </div>
-        </section>
-      </div>
-
-      <div id="status-client-modal" class="modal-backdrop" data-dialog="status" role="presentation" hidden aria-hidden="true">
-        <section class="modal-dialog panel" role="dialog" aria-modal="true" aria-labelledby="status-dialog-title" aria-describedby="status-dialog-copy">
-          <div class="modal-heading">
-            <div>
-              <div class="eyebrow" data-i18n="statusEyebrow">CLIENT LIFECYCLE / MOCK</div>
-              <h2 id="status-dialog-title" data-i18n="statusDialogTitle">Изменить состояние</h2>
-            </div>
-            <button id="status-close" class="icon-button" type="button" data-i18n-label="closeStatus" aria-label="Закрыть диалог состояния">×</button>
-          </div>
-          <p id="status-dialog-copy" class="modal-copy">—</p>
-          <div class="preview-step">
-            <div class="action-summary">
-              <span data-i18n="selectedClient">Клиент</span>
-              <strong id="status-client-name">—</strong>
-            </div>
-            <div class="preview-boundary" data-i18n="mockActionBoundary">Изменение выполняется только в frontend mock state; production peer не затрагивается.</div>
-          </div>
-          <div class="modal-actions">
-            <button id="status-cancel" class="button button-quiet" type="button" data-i18n="cancel">Отмена</button>
-            <button id="status-confirm" class="button button-primary" type="button">Подтвердить</button>
           </div>
         </section>
       </div>

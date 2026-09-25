@@ -69,11 +69,10 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('#app')?.getAttribute('aria-busy') === 'false');
     await page.locator('#add-client-button').click();
     assert.match(await page.locator('#preview-dialog-title').textContent(), /создан|creat/i);
+    assert.match(await page.locator('#preview-dialog-copy').textContent(), /одноразов|one.time/i);
     await page.locator('#preview-name').fill(client.name);
     await page.locator('#preview-tags').fill('field');
-    await page.locator('#preview-next').click();
-    assert.match(await page.locator('#preview-step-confirm').textContent(), /peer/i);
-    await page.locator('#preview-ack').check();
+    assert.equal(await page.locator('#preview-ack, #preview-step-confirm').count(), 0);
     await page.screenshot({ path: `${artifacts}/before-submit-no-secrets.png` });
     await page.locator('#preview-submit').click();
     await page.waitForFunction(() => document.querySelector('#preview-step-result')?.getAttribute('hidden') === null);
@@ -109,14 +108,12 @@ async function main() {
     await page.locator('#add-client-button').click();
     await page.locator('#preview-name').fill('Lost Response');
     await page.locator('#preview-tags').fill('field');
-    await page.locator('#preview-next').click();
-    await page.locator('#preview-ack').check();
     await page.locator('#preview-submit').evaluate(button => button.click());
     await page.waitForFunction(() => document.querySelector('#create-reconcile')?.textContent.includes('nonce:'));
     assert.equal(await page.locator('#create-reconcile-check').isDisabled(), true, 'cannot resolve while POST is in flight');
     releaseLostResponse();
     await page.waitForFunction(() => document.querySelector('#create-reconcile')?.textContent.includes('peer-orphan123'));
-    assert.equal(await page.locator('#create-reconcile').isVisible(), true, 'reconciliation must be visible on confirmation step');
+    assert.equal(await page.locator('#create-reconcile').isVisible(), true, 'reconciliation must be visible on create form');
     await page.screenshot({ path: `${artifacts}/lost-response-no-secrets.png` });
     assert.equal(posts, 2);
     assert.match(await page.locator('#create-reconcile').textContent(), new RegExp(lostNonce));
@@ -141,11 +138,11 @@ async function main() {
     assert.equal(await secondTab.locator('#preview-submit').isDisabled(), true);
     await secondTab.close();
     await page.locator('#create-reconcile-check').click();
-    assert.equal(await page.locator('#create-reconcile-resolve').isDisabled(), true, 'orphan still exists');
+    assert.equal(await page.locator('#create-reconcile-resolve').count(), 0, 'no extra confirmation is shown');
     orphanPresent = false; // Simulate explicit external operator cleanup, never a UI auto-delete.
     await page.locator('#create-reconcile-check').click();
-    await page.waitForFunction(() => document.querySelector('#create-reconcile-resolve')?.disabled === false);
-    await page.locator('#create-reconcile-resolve').click();
+    await page.waitForFunction(() => document.querySelector('#create-reconcile-check')?.textContent.includes('Снять блокировку'));
+    await page.locator('#create-reconcile-check').click();
     await page.waitForFunction(() => document.querySelector('#create-reconcile')?.hidden === true);
     assert.equal(posts, 2);
     const afterLoss = await page.evaluate(() => [document.documentElement.outerHTML, JSON.stringify(localStorage), JSON.stringify(sessionStorage)].join('\n'));
