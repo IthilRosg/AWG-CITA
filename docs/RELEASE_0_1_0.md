@@ -31,12 +31,12 @@ wheel.
 - Isolated wheel build/install smoke test passes.
 - Public safety scan passes on the current development candidate. The canary
   configuration contract is described in [CANARY_CONFIG.md](CANARY_CONFIG.md).
-- A versioned development candidate is installed on the operator host. The
+- A versioned `0.1.0` wheel candidate is installed on the operator host. The
   application and relay use private Unix sockets; the protected original peer
   profile and action audit are installed with restricted permissions. The
   precise host, artifact digest, baseline and rollback evidence remain in the
   private migration packet under `.ops-tmp/`.
-- A read-only Playwright smoke check loaded the installed panel assets through
+- A read-only Playwright smoke check loaded the installed `0.1.0` panel assets through
   the private relay and confirmed real-canary mode and one live peer. Public
   unauthenticated requests, including requests with a forged operator header,
   returned `401` on the tested page, API and static routes.
