@@ -50,6 +50,17 @@ application and relay units must use the same `current` release. Switch the
 root-owned `current` symlink only during the reviewed service change, and keep
 the previous release intact for rollback. No service account may write the
 link, a release directory, or any Python module loaded by the root helper.
+The candidate directory must include all declared runtime dependencies, not
+only the `awg_cita` wheel contents. Creation imports `segno` to generate the
+one-time QR code. Before switching `current`, test the actual helper interpreter
+and import path, for example:
+
+```sh
+/usr/bin/python3 -I -c 'import sys; sys.path.insert(0, "/opt/awg-cita/current/site"); import awg_cita.canary_helper, segno; assert segno.make_qr("synthetic check").png_data_uri().startswith("data:image/png;base64,")'
+```
+
+Use the staged candidate path in place of `current` for the pre-switch check.
+A package import alone does not exercise this lazy QR dependency.
 
 If the application unit uses `ProtectSystem=full`, its sudo-invoked root helper
 inherits the same read-only mount namespace. Permit only the AWG configuration

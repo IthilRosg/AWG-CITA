@@ -36,7 +36,10 @@ def main() -> int:
         venv.EnvBuilder(with_pip=True).create(environment)
         interpreter = python_in(environment)
         subprocess.run([str(interpreter), "-m", "pip", "install", "--no-index", "--find-links", str(dist), "awg-cita"], check=True)
-        subprocess.run([str(interpreter), "-c", "import awg_cita.app"], check=True)
+        subprocess.run([str(interpreter), "-c",
+                        "import awg_cita.app, segno; "
+                        "assert segno.make_qr('synthetic acceptance').png_data_uri().startswith('data:image/png;base64,')"],
+                       check=True)
         subprocess.run([str(console_in(environment)), "--help"], check=True, stdout=subprocess.DEVNULL)
     print("wheel_package_data=PASS")
     return 0
