@@ -1,5 +1,6 @@
 """Synthetic loopback server for browser tests; never use for deployment."""
 
+import os
 import sys
 from pathlib import Path
 
@@ -13,4 +14,12 @@ DUMP = "\n".join(("\t".join(INTERFACE), "\t".join(PEER)))
 
 if __name__ == "__main__":
     reader = AwgReader(binary="/usr/local/bin/awg", interface="awg0", runner=lambda _argv, _timeout: (DUMP, ""), clock=lambda: 1700000030)
-    create_server(reader, "127.0.0.1", 8791).serve_forever()
+    port = int(os.environ.get("AWG_FIXTURE_PORT", "0"))
+    fixture_mode = os.environ.get("AWG_FIXTURE_MODE", "normal")
+    if fixture_mode not in {"normal", "test"}:
+        raise SystemExit("AWG_FIXTURE_MODE must be normal or test")
+    server = create_server(reader, "127.0.0.1", port, test_mode=fixture_mode == "test")
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()

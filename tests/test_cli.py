@@ -5,6 +5,47 @@ from awg_cita import cli
 
 
 class CliTests(unittest.TestCase):
+    def test_canary_cli_uses_fixed_unix_ingress_not_tcp(self):
+        captured = {}
+
+        class Server:
+            def serve_forever(self):
+                pass
+
+            def server_close(self):
+                pass
+
+        def create_server(_reader, **kwargs):
+            captured.update(kwargs)
+            return Server()
+
+        class Audit:
+            def close(self):
+                pass
+
+        with patch('awg_cita.cli.create_server', create_server), patch('awg_cita.cli.ActionAuditLog.open', return_value=Audit()):
+            self.assertEqual(cli.main(['--binary', '/usr/local/bin/awg', '--interface', 'awg-canary0',
+                                       '--allowed-host', 'panel.example', '--operator-origin',
+                                       'https://panel.example:8444', '--operator-id', 'operator-1',
+                                       '--action-audit-log', '/var/lib/awg-cita/actions.jsonl', '--canary-actions']), 0)
+        self.assertEqual(captured['unix_socket_path'], '/run/awg-cita-app/backend.sock')
+        self.assertNotIn('host', captured)
+        self.assertNotIn('port', captured)
+        self.assertNotIn('test_mode', captured)
+        self.assertEqual(captured['operator_id'], 'operator-1')
+        self.assertIsNotNone(captured['action_audit_log'])
+
+    def test_canary_cli_rejects_missing_or_mismatched_operator_origin(self):
+        base = ['--binary', '/usr/local/bin/awg', '--interface', 'awg-canary0',
+                '--allowed-host', 'panel.example', '--canary-actions']
+        with patch('awg_cita.cli.create_server', side_effect=AssertionError('must not start')):
+            for suffix in ([], ['--operator-origin', 'https://other.example'],
+                           ['--operator-origin', 'http://panel.example'],
+                           ['--operator-origin', 'https://panel.example/path'],
+                           ['--operator-origin', 'https://user@panel.example']):
+                with self.subTest(suffix=suffix), self.assertRaises(SystemExit):
+                    cli.main(base + suffix)
+
     def test_main_constructs_loopback_server_with_explicit_safe_values(self):
         captured = {}
 

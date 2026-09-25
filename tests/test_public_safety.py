@@ -1,7 +1,7 @@
 import re
 import unittest
 
-from scripts.check_public_safety import PATTERNS, public_ip_literals
+from scripts.check_public_safety import PATTERNS, TEXT_SUFFIXES, public_ip_literals
 
 
 class PublicSafetyTests(unittest.TestCase):
@@ -29,6 +29,9 @@ class PublicSafetyTests(unittest.TestCase):
         ipv6 = "2001" + ":db8::1"
         text = f"peer={ipv4}:8080 and peer=[{ipv6}]:51820 and loopback=127.0.0.1"
         self.assertEqual(public_ip_literals(text), [ipv4, ipv6])
+
+    def test_svg_is_classified_as_reviewed_text(self):
+        self.assertIn(".svg", TEXT_SUFFIXES)
 
 
 if __name__ == "__main__":

@@ -4,11 +4,11 @@ A security-first, self-hosted operator console for **AmneziaWG**.
 
 ## Status
 
-Public pre-alpha. The read-only milestone provides interface state, safe peer
-metadata, traffic counters, a client dossier, bounded in-memory status history
-and a localized operator UI. Peer mutations, configuration exports and QR
-generation are intentionally out of scope until their threat model, audit trail
-and rollback controls are implemented.
+Version 0.1.0 provides interface state, safe
+peer metadata, traffic counters, a client dossier, bounded in-memory status
+history and a localized operator UI. It also contains a canary-only peer
+lifecycle candidate with create, enable, disable, delete and one-time
+configuration delivery on the explicitly enabled canary interface.
 
 ## Product boundary
 
@@ -19,10 +19,11 @@ privileged shell access. It is designed around a narrow, allowlisted data model:
 - reverse-proxy authentication at the public boundary;
 - strict Host allowlisting: default loopback names only; a reverse-proxy hostname
   must be passed explicitly through `allowed_hosts` when creating the server;
-- no private keys, peer public keys, endpoints, client IDs, tokens, raw dumps or
-  configuration payloads in the UI/API;
-- read-only first, with controlled actions added only behind explicit policy,
-  confirmation, audit and rollback gates.
+- read-only status and history omit keys, endpoints, client IDs, raw dumps and
+  configuration payloads; authenticated action mode uses opaque client IDs and
+  returns a private configuration only in the one-time create response;
+- controlled actions require explicit policy, confirmation, audit and rollback
+  gates.
 
 ## Planned milestones
 
@@ -53,7 +54,12 @@ boundary, reverse-proxy responsibilities, preflight and rollback checks.
 
 This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
 
-## V0 HTTP contract
+## V0 read-only HTTP contract
+
+This describes the original read-only mode. The canary lifecycle candidate adds
+private, authenticated same-origin routes when explicitly enabled; its release
+contract is documented in [CANARY_HTTP_CONTRACT.md](docs/CANARY_HTTP_CONTRACT.md)
+and its security boundary in [THREAT_MODEL.md](docs/THREAT_MODEL.md).
 
 - `GET /` serves the operator UI; `GET /api/status` serves the safe telemetry.
 - `GET /api/history` serves a bounded, in-process projection of prior safe-status

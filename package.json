@@ -1,1 +1,1 @@
-{"name":"awg-cita-browser-tests","private":true,"version":"0.0.0","devDependencies":{"@playwright/test":"^1.58.2"},"scripts":{"test:browser":"node tests/browser_ui.js"}}
+{"name":"awg-cita-browser-tests","private":true,"version":"0.0.0","devDependencies":{"@playwright/test":"^1.58.2"},"scripts":{"test:browser":"node tests/browser_ui.js && node tests/browser_adapter_boundary.js && node tests/browser_real_canary.js && node tests/browser_create_canary.js"}}

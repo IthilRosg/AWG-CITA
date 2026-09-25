@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 import threading
 import time
@@ -18,6 +19,13 @@ _MAX_BYTES = 18_446_744_073_709_551_615
 _ERROR_CODES = frozenset({"awg_output_too_large", "invalid_awg_dump", "awg_command_failed"})
 _MAX_AUDIT_BYTES = 1_048_576
 _MAX_RECORD_BYTES = 512
+_ACTION_OPERATIONS = frozenset({"create", "enable", "disable", "delete"})
+_ACTION_RESULTS = frozenset({"OK", "invalid_request", "client_not_found", "invalid_state", "conflict",
+                             "internal_error", "awg_timeout", "configuration_failed", "awg_command_failed"})
+_ACTOR_RE = re.compile(r"[A-Za-z0-9_.@-]{1,64}\Z")
+_PEER_RE = re.compile(r"peer-[0-9a-f]{16}\Z")
+_HEX32_RE = re.compile(r"[0-9a-f]{32}\Z")
+_HEX64_RE = re.compile(r"[0-9a-f]{64}\Z")
 
 
 def _utc_now() -> str:
@@ -74,6 +82,23 @@ def project_status_event(snapshot: dict[str, object], *, checked_at: str) -> dic
         "peer_count": peer_count,
         "summary": safe_summary,
     }
+
+
+def project_action_event(*, checked_at: str, phase: str, correlation_id: str,
+                         actor: str, operation: str, client_id: str,
+                         nonce_digest: str, result: str | None = None) -> dict[str, object]:
+    checked_at = _checked_at(checked_at)
+    if (phase not in {"INTENT", "RESULT"} or not _HEX32_RE.fullmatch(correlation_id) or
+            not _ACTOR_RE.fullmatch(actor) or operation not in _ACTION_OPERATIONS or
+            not isinstance(client_id, str) or (client_id and not _PEER_RE.fullmatch(client_id)) or
+            not _HEX64_RE.fullmatch(nonce_digest) or
+            (phase == "INTENT" and result is not None) or
+            (phase == "RESULT" and result not in _ACTION_RESULTS)):
+        raise ValueError("invalid action audit event")
+    return {"schema_version": 1, "kind": "action", "checked_at": checked_at,
+            "phase": phase, "correlation_id": correlation_id, "actor": actor,
+            "operation": operation, "client_id": client_id,
+            "nonce_digest": nonce_digest, **({"result": result} if result is not None else {})}
 
 
 class AuditLog:
@@ -173,24 +198,27 @@ class AuditLog:
                 if self._last_recorded is not None and now - self._last_recorded < self._minimum_interval:
                     return False
                 event = project_status_event(snapshot, checked_at=self._clock())
-                encoded = (json.dumps(event, separators=(",", ":")) + "\n").encode("utf-8")
-                if len(encoded) > _MAX_RECORD_BYTES:
-                    raise ValueError("audit record too large")
-                metadata = os.fstat(self._descriptor)
-                if metadata.st_size + len(encoded) > _MAX_AUDIT_BYTES:
-                    raise ValueError("audit file capacity exhausted")
-                written = os.write(self._descriptor, encoded)
-                if written != len(encoded):
-                    raise OSError("short audit write")
-                os.fsync(self._descriptor)
-                new_size = self._expected_size + written
-                self._validate_current_descriptor(expected_size=new_size)
-                self._expected_size = new_size
+                self._append_event(event)
             except Exception as error:
                 self._failed = True
                 raise RuntimeError("audit writer failed") from error
             self._last_recorded = now
             return True
+
+    def _append_event(self, event: dict[str, object]) -> None:
+        encoded = (json.dumps(event, separators=(",", ":")) + "\n").encode("utf-8")
+        if len(encoded) > _MAX_RECORD_BYTES:
+            raise ValueError("audit record too large")
+        metadata = os.fstat(self._descriptor)
+        if metadata.st_size + len(encoded) > _MAX_AUDIT_BYTES:
+            raise ValueError("audit file capacity exhausted")
+        written = os.write(self._descriptor, encoded)
+        if written != len(encoded):
+            raise OSError("short audit write")
+        os.fsync(self._descriptor)
+        new_size = self._expected_size + written
+        self._validate_current_descriptor(expected_size=new_size)
+        self._expected_size = new_size
 
     def close(self) -> None:
         with self._lock:
@@ -200,3 +228,71 @@ class AuditLog:
             if self._parent_descriptor is not None:
                 os.close(self._parent_descriptor)
                 self._parent_descriptor = None
+
+
+class ActionAuditLog(AuditLog):
+    """Durable, fail-closed intent/result evidence for action mode."""
+
+    @classmethod
+    def open(cls, path: Path, *, clock: Callable[[], str] | None = None) -> "ActionAuditLog":
+        log = super().open(path, minimum_interval=60, clock=clock)
+        try:
+            reader = os.open(log._leaf_name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                             dir_fd=log._parent_descriptor)
+            try:
+                metadata = cls._validate_descriptor(reader)
+                if (metadata.st_dev, metadata.st_ino, metadata.st_size) != (
+                        log._device, log._inode, log._expected_size):
+                    raise ValueError("action audit file changed during open")
+                data = os.read(reader, _MAX_AUDIT_BYTES + 1)
+            finally:
+                os.close(reader)
+            if len(data) != log._expected_size:
+                raise ValueError("action audit file changed during open")
+            pending: dict[str, tuple[str, str, str]] = {}
+            completed: set[str] = set()
+            for line in data.splitlines():
+                event = json.loads(line)
+                projected = project_action_event(
+                    checked_at=event["checked_at"], phase=event["phase"],
+                    correlation_id=event["correlation_id"], actor=event["actor"],
+                    operation=event["operation"], client_id=event["client_id"],
+                    nonce_digest=event["nonce_digest"], result=event.get("result"))
+                if event != projected:
+                    raise ValueError("invalid action audit record")
+                correlation_id = event["correlation_id"]
+                if event["phase"] == "INTENT":
+                    if correlation_id in pending or correlation_id in completed:
+                        raise ValueError("duplicate action audit intent")
+                    pending[correlation_id] = (event["actor"], event["operation"], event["nonce_digest"])
+                else:
+                    if pending.pop(correlation_id, None) != (
+                            event["actor"], event["operation"], event["nonce_digest"]):
+                        raise ValueError("unpaired action audit result")
+                    completed.add(correlation_id)
+            if pending:
+                raise ValueError("unmatched action audit intent requires reconciliation")
+            log._validate_current_descriptor()
+            return log
+        except Exception as error:
+            log.close()
+            if isinstance(error, (OSError, ValueError)):
+                raise
+            raise ValueError("invalid action audit file") from error
+
+    def record_action(self, *, phase: str, correlation_id: str, actor: str,
+                      operation: str, client_id: str, nonce_digest: str,
+                      result: str | None = None) -> None:
+        with self._lock:
+            if self._failed:
+                raise RuntimeError("action audit writer failed")
+            try:
+                self._validate_current_descriptor()
+                event = project_action_event(checked_at=self._clock(), phase=phase,
+                                             correlation_id=correlation_id, actor=actor,
+                                             operation=operation, client_id=client_id,
+                                             nonce_digest=nonce_digest, result=result)
+                self._append_event(event)
+            except Exception as error:
+                self._failed = True
+                raise RuntimeError("action audit writer failed") from error

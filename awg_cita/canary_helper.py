@@ -1,0 +1,284 @@
+"""Fixed root-only operations for the awg-canary0 persistent peer file."""
+from __future__ import annotations
+
+import fcntl
+import ipaddress
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+import time
+from contextlib import contextmanager
+from pathlib import Path
+
+from .real_awg import CanaryPeerController, PersistentCanaryConfig, _ALLOWED, _valid_key, valid_endpoint_host
+
+CONFIG = Path('/etc/amnezia/amneziawg/awg-canary0.conf')
+LOCK = Path('/run/lock/awg-cita-canary.lock')
+BACKUPS = Path('/var/backups/awg-cita-canary')
+READ = '/usr/local/sbin/awg-manager-read'
+AWG = '/usr/local/bin/awg'
+RESTART = ('/usr/bin/systemctl', 'restart', 'awg-canary0.service')
+_ID = re.compile(r'peer-[0-9a-f]{16}\Z')
+_ENV = {'PATH': '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C', 'LC_ALL': 'C'}
+PROTECTED_PROFILE_FILE = Path('/etc/awg-cita/protected-peer.json')
+
+
+def _root_regular(fd: int) -> os.stat_result:
+    info = os.fstat(fd)
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077:
+        raise ValueError('unsafe canary file')
+    return info
+
+
+@contextmanager
+def _locked():
+    fd = os.open(LOCK, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        _root_regular(fd)
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError('canary operation busy') from None
+                time.sleep(min(0.05, remaining))
+        yield
+    finally:
+        os.close(fd)
+
+
+def _read_config() -> bytes:
+    fd = os.open(CONFIG, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        _root_regular(fd)
+        data = os.read(fd, 65537)
+    finally:
+        os.close(fd)
+    PersistentCanaryConfig(data)
+    return data
+
+
+def _write_all(fd: int, data: bytes) -> None:
+    with os.fdopen(fd, 'wb', closefd=True) as stream:
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def _write_config(expected: bytes, replacement: bytes) -> None:
+    current = _read_config()
+    if current != expected:
+        raise ValueError('config drift')
+    PersistentCanaryConfig(replacement)
+    info = os.stat(CONFIG, follow_symlinks=False)
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077:
+        raise ValueError('unsafe canary file')
+    BACKUPS.mkdir(mode=0o700, exist_ok=True)
+    if BACKUPS.stat().st_uid != 0 or BACKUPS.stat().st_mode & 0o077:
+        raise ValueError('unsafe backup directory')
+    backup = BACKUPS / ('awg-canary0-' + str(time.time_ns()) + '.conf')
+    _write_all(os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600), current)
+    temp = CONFIG.with_name('.awg-canary0.conf.awg-cita-' + str(os.getpid()))
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        os.fchown(fd, info.st_uid, info.st_gid)
+        os.fchmod(fd, stat.S_IMODE(info.st_mode))
+        _write_all(fd, replacement)
+        if _read_config() != expected:
+            raise ValueError('config drift')
+        os.replace(temp, CONFIG)
+        directory = os.open(CONFIG.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if temp.exists():
+            temp.unlink()
+
+
+def _read_dump() -> str:
+    result = subprocess.run((READ,), capture_output=True, timeout=5, env=_ENV)
+    if result.returncode or result.stderr or len(result.stdout) > 65536:
+        raise ValueError('canary read failed')
+    return result.stdout.decode('utf-8')
+
+
+def _sync_runtime() -> None:
+    result = subprocess.run(RESTART, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, env=_ENV)
+    if result.returncode:
+        state = subprocess.run(('/usr/bin/systemctl', 'show', '--value', '--property=Result', 'awg-canary0.service'),
+                               capture_output=True, timeout=5, env=_ENV)
+        if state.returncode or state.stdout.strip() != b'start-limit-hit':
+            raise ValueError('canary restart failed')
+        reset = subprocess.run(('/usr/bin/systemctl', 'reset-failed', 'awg-canary0.service'),
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, env=_ENV)
+        started = subprocess.run(('/usr/bin/systemctl', 'start', 'awg-canary0.service'),
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, env=_ENV) if not reset.returncode else reset
+        if started.returncode:
+            raise ValueError('canary restart failed')
+
+
+def _protected_peer_profile() -> tuple[str, bytes, str, str, dict[str, str], str, int]:
+    parent = os.lstat(PROTECTED_PROFILE_FILE.parent)
+    if not stat.S_ISDIR(parent.st_mode) or parent.st_uid != 0 or parent.st_mode & 0o022:
+        raise ValueError('unsafe protected profile directory')
+    fd = os.open(PROTECTED_PROFILE_FILE, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        _root_regular(fd)
+        raw = os.read(fd, 513)
+    finally:
+        os.close(fd)
+    if len(raw) > 512:
+        raise ValueError('invalid protected peer profile')
+    def unique(pairs):
+        result = {}
+        for name, item in pairs:
+            if name in result:
+                raise ValueError('duplicate protected profile field')
+            result[name] = item
+        return result
+    value = json.loads(raw, object_pairs_hook=unique)
+    if not isinstance(value, dict) or set(value) != {'public_key', 'route', 'endpoint_host', 'dns_server', 'obfuscation', 'interface_address', 'listen_port'}:
+        raise ValueError('invalid protected peer profile')
+    key = _valid_key(value['public_key'].encode('ascii'))
+    route = ipaddress.ip_network(value['route'], strict=True)
+    if route.version != 4 or route.prefixlen != 32:
+        raise ValueError('invalid protected peer route')
+    if not valid_endpoint_host(value['endpoint_host']) or not isinstance(value['dns_server'], str):
+        raise ValueError('invalid protected peer profile')
+    ipaddress.ip_address(value['dns_server'])
+    expected = value['obfuscation']
+    if not isinstance(expected, dict) or set(expected) != {'S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4'} or not all(isinstance(item, str) for item in expected.values()):
+        raise ValueError('invalid protected peer profile')
+    interface = ipaddress.ip_interface(value['interface_address'])
+    port = value['listen_port']
+    if interface.version != 4 or type(port) is not int or not 1 <= port <= 65535:
+        raise ValueError('invalid protected peer profile')
+    return key, str(route).encode('ascii'), value['endpoint_host'], value['dns_server'], expected, str(interface), port
+
+
+def _read_protected_config() -> bytes:
+    data = _read_config()
+    persisted = PersistentCanaryConfig(data)
+    original_key, original_route, _endpoint, _dns, _obfuscation, _address, _port = _protected_peer_profile()
+    protected = set()
+    for key, (_status, _representation, block) in persisted._entries.items():
+        routes = [_ALLOWED.fullmatch(line).group(1) for line in block.splitlines(keepends=True) if _ALLOWED.fullmatch(line)]
+        if routes == [original_route]:
+            protected.add(key)
+    if protected != {original_key} or persisted.peers().get(original_key) != 'enabled':
+        raise ValueError('protected original peer drift')
+    return data
+
+def _controller() -> CanaryPeerController:
+    persisted = PersistentCanaryConfig(_read_protected_config())
+    protected_key, _route, endpoint, dns, obfuscation, address, port = _protected_peer_profile()
+    protected = {protected_key}
+    return CanaryPeerController(_read_protected_config, _read_dump, write_config=_write_config,
+                                sync_runtime=_sync_runtime, mutable_keys=set(persisted.peers()) - protected,
+                                endpoint_host=endpoint, dns_server=dns, expected_obfuscation=obfuscation,
+                                expected_interface_address=address, expected_listen_port=port)
+
+
+def _awg_key(argv: tuple[str, ...], input_key: str | None = None) -> str:
+    """Run one fixed AWG key command, never exposing its output to errors."""
+    if argv not in ((AWG, 'genkey'), (AWG, 'pubkey'), (AWG, 'show', 'awg-canary0', 'public-key')):
+        raise ValueError('invalid key operation')
+    process = subprocess.Popen(argv, stdin=subprocess.PIPE if input_key is not None else subprocess.DEVNULL,
+                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=_ENV)
+    try:
+        if input_key is not None:
+            from .real_awg import _valid_key
+            _valid_key(input_key.encode('ascii'))
+            process.stdin.write((input_key + '\n').encode('ascii'))
+            process.stdin.close()
+        import select
+        ready, _, _ = select.select([process.stdout], [], [], 5)
+        if not ready:
+            raise ValueError('AWG key command timeout')
+        output = os.read(process.stdout.fileno(), 65)
+        if len(output) > 64 or process.wait(timeout=5) != 0:
+            raise ValueError('AWG key command failed')
+        from .real_awg import _valid_key
+        return _valid_key(output.strip())
+    except Exception:
+        raise ValueError('AWG key command failed') from None
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+        process.stdout.close()
+
+
+def _keypair() -> tuple[str, str]:
+    private = _awg_key((AWG, 'genkey'))
+    return private, _awg_key((AWG, 'pubkey'), private)
+
+
+def _server_public() -> str:
+    return _awg_key((AWG, 'show', 'awg-canary0', 'public-key'))
+
+
+def _read_create_request() -> dict[str, object]:
+    import select
+    fd = sys.stdin.fileno()
+    body = bytearray()
+    deadline = time.monotonic() + 5
+    while True:
+        if not select.select([fd], [], [], max(0, deadline - time.monotonic()))[0]:
+            raise ValueError('incomplete create request')
+        chunk = os.read(fd, 1025 - len(body))
+        if not chunk:
+            break
+        body.extend(chunk)
+        if len(body) > 1024:
+            raise ValueError('invalid create request')
+    if not body:
+        raise ValueError('invalid create request')
+    def unique(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError('duplicate request field')
+            value[key] = item
+        return value
+    request = json.loads(body.decode('ascii'), object_pairs_hook=unique)
+    if not isinstance(request, dict) or set(request) != {'name', 'tags', 'idempotencyKey'}:
+        raise ValueError('invalid create request')
+    return request
+
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    if os.geteuid() != 0 or not ((len(args) == 1 and args[0] == 'list') or
+                                  (len(args) == 2 and args[0] in {'disable', 'enable', 'delete'} and _ID.fullmatch(args[1])) or
+                                  (len(args) == 1 and args[0] == 'create')):
+        print('invalid canary operation', file=sys.stderr)
+        return 64
+    try:
+        request = _read_create_request() if args[0] == 'create' else None
+        with _locked():
+            controller = _controller()
+            if args[0] == 'list':
+                result = {'schema_version': 1, 'clients': controller.list_clients()}
+            elif args[0] == 'create':
+                result = controller.create(request['name'], request['tags'], request['idempotencyKey'], _keypair, _server_public)
+            else:
+                value = controller.mutate(args[0], args[1])
+                result = {'schema_version': 1, **({'id': args[1], 'deleted': True} if args[0] == 'delete' else {'client': value})}
+        print(json.dumps(result, separators=(',', ':')))
+        return 0
+    except Exception:
+        # Never emit a traceback: exceptions may have traversed key material.
+        print('canary operation failed', file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
