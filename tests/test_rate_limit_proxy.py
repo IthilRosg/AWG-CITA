@@ -194,6 +194,18 @@ class RateLimitRelayTests(unittest.TestCase):
         conn.close()
         return status, fields, data
 
+    def raw_status(self, method, path, body=b'', headers=None):
+        fields = {'Host': HOST, 'X-AWG-Operator': 'test-operator', 'Content-Length': str(len(body)),
+                  **(headers or {})}
+        request = (f'{method} {path} HTTP/1.1\r\n' +
+                   ''.join(f'{key}: {value}\r\n' for key, value in fields.items()) +
+                   '\r\n').encode() + body
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(3)
+            client.connect(self.relay_path)
+            client.sendall(request)
+            return int(client.recv(1024).split(b'\r\n', 1)[0].split()[1])
+
     def test_public_get_carries_only_application_session_to_backend(self):
         status, headers, _ = self.request('GET', '/')
         self.assertEqual(status, 200)
@@ -247,9 +259,9 @@ class RateLimitRelayTests(unittest.TestCase):
         )
         for route, headers, expected in cases:
             with self.subTest(route=route, expected=expected, headers=tuple(headers)):
-                self.assertEqual(self.request('POST', route, body, headers)[0], expected)
+                self.assertEqual(self.raw_status('POST', route, body, headers), expected)
         self.assertEqual(Backend.posts, [])
-        self.assertEqual(self.request('POST', path, b'x' * 2049, trusted)[0], 400)
+        self.assertEqual(self.raw_status('POST', path, b'x' * 2049, trusted), 400)
         self.assertEqual(Backend.posts, [])
 
     def test_status_rate_limit_remains_in_force(self):
