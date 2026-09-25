@@ -21,7 +21,7 @@ wheel.
    environment, and verify package assets and the command-line entry point.
 6. Identify the exact installed server revision before deployment. Record the
    candidate wheel digest, preflight, backup, health checks, and rollback steps.
-   Deployment and production mutation require their own reviewed change.
+   Production mutation requires a separately reviewed acceptance run.
 
 ## Current evidence
 
@@ -31,11 +31,27 @@ wheel.
 - Isolated wheel build/install smoke test passes.
 - Public safety scan passes on the current development candidate. The canary
   configuration contract is described in [CANARY_CONFIG.md](CANARY_CONFIG.md).
-- The deployed server files differ from this development tree. Local tests do
-  not certify the deployed revision. The installed action and relay services
-  currently use loopback TCP and have no private Unix sockets or protected-peer
-  profile, so deployment requires a topology migration rather than a file swap.
-- Unauthenticated GETs on the current operator origin return `401` for `/`,
-  `/api/clients` and `/api/status`. This is a narrow live observation, not a
-  complete authorization review. The private host migration packet is kept
-  outside the release candidate under `.ops-tmp/`.
+- A versioned development candidate is installed on the operator host. The
+  application and relay use private Unix sockets; the protected original peer
+  profile and action audit are installed with restricted permissions. The
+  precise host, artifact digest, baseline and rollback evidence remain in the
+  private migration packet under `.ops-tmp/`.
+- A read-only Playwright smoke check loaded the installed panel assets through
+  the private relay and confirmed real-canary mode and one live peer. Public
+  unauthenticated requests, including requests with a forged operator header,
+  returned `401` on the tested page, API and static routes.
+- An isolated copy of the installed Caddy operator block rejected an
+  unauthenticated request and replaced a forged identity header with the
+  authenticated test account before forwarding. This does not replace an
+  authenticated end-to-end check of the live public route.
+- Reachable Git history and the intended public file set were scanned for
+  embedded credentials, private-key files, host-specific markers and large or
+  binary artifacts. Flagged assignments were synthetic test fixtures. The
+  server's protected configuration and backup remain private. Production
+  create/enable/disable/delete, audit reconciliation, rollback and final
+  cleanup remain open gates before publishing `0.1.0`.
+
+## After 0.1.0
+
+Add a dedicated settings menu for panel and AWG configuration. This is a
+follow-up feature and does not expand the current release gate.

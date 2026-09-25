@@ -65,6 +65,7 @@ performed with the service stopped; capacity exhaustion fails closed.
 6. A separate proxy integration test confirms the actual authenticated account
    is injected by the proxy and client-supplied identity is overwritten.
 
-This design does not authorize a production change. The local application and
-relay implement the single-account check and action log, while proxy header
-injection and Linux failure tests remain to be verified before deployment.
+The installed canary candidate implements the single-account check and action
+log. Linux CI exercises the failure tests with synthetic data; an isolated copy
+of the installed proxy block passed header-replacement checks. A controlled
+production mutation and audit reconciliation remain release acceptance checks.

@@ -62,8 +62,9 @@ and `AWG_CITA_OPERATOR_ID` to the single Basic Auth username. Keep Basic Auth
 on every route to the relay. Validate the full Caddyfile with `caddy validate`
 and prove an unauthenticated request with a forged header receives 401, then
 prove an authenticated request with a forged header reaches the relay as the
-authenticated username. The audited production proxy did not have this line at
-the time of the 0.1.0 review.
+authenticated username. An isolated copy of the installed operator block has
+passed this check; the live authenticated route remains a release acceptance
+check.
 
 These settings are a configuration contract, not a deployment procedure. Before
 updating a host, inventory the installed helper, service and proxy versions,

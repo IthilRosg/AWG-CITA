@@ -163,6 +163,34 @@ class ServiceCreateTests(unittest.TestCase):
 
 
 class RealCreateTests(unittest.TestCase):
+    def test_create_preserves_repeated_awg_hook_commands(self):
+        hooks = b'PostUp = true\nPostUp = true\nPostDown = true\nPostDown = true\n'
+        profile = PROFILE.replace(b'ListenPort = 51820\n', b'ListenPort = 51820\n' + hooks)
+        state = {'config': profile, 'runtime': set(PersistentCanaryConfig(profile).peers())}
+        def cas(before, after):
+            self.assertEqual(before, state['config'])
+            state['config'] = after
+        def sync():
+            state['runtime'] = {key for key, status in PersistentCanaryConfig(state['config']).peers().items() if status == 'enabled'}
+        controller = CanaryPeerController(lambda: state['config'], lambda: dump(state), write_config=cas, sync_runtime=sync)
+        with patch('segno.make_qr') as qr:
+            qr.return_value.png_data_uri.return_value = 'data:image/png;base64,Zml4dHVyZQ=='
+            result = controller.create('New Device', [], 'request-hooks-01',
+                                       lambda: (CLIENT_PRIVATE, CLIENT_PUBLIC), lambda: SERVER_PUBLIC)
+        self.assertTrue(result['oneTime'])
+        self.assertIn(hooks, state['config'])
+        self.assertEqual(state['config'].count(b'PostUp = true\n'), 2)
+        self.assertEqual(state['config'].count(b'PostDown = true\n'), 2)
+
+    def test_create_still_rejects_duplicate_profile_field(self):
+        profile = PROFILE.replace(b'Address = 127.0.0.1/24\n', b'Address = 127.0.0.1/24\n' * 2)
+        state = {'config': profile, 'runtime': set(PersistentCanaryConfig(profile).peers())}
+        controller = CanaryPeerController(lambda: state['config'], lambda: dump(state),
+                                          write_config=lambda *_: self.fail('unexpected write'), sync_runtime=lambda: None)
+        with self.assertRaisesRegex(ValueError, 'duplicate canary interface field'):
+            controller.create('New Device', [], 'request-hooks-02',
+                              lambda: (CLIENT_PRIVATE, CLIENT_PUBLIC), lambda: SERVER_PUBLIC)
+
     def test_create_returns_one_time_config_and_persists_only_public_peer(self):
         state = {'config': PROFILE, 'runtime': set(PersistentCanaryConfig(PROFILE).peers()), 'writes': 0}
         def cas(before, after):

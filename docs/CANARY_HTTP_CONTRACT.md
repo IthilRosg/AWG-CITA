@@ -54,7 +54,6 @@ limits are operational controls, not operator authorization.
 
 The application writes a separate durable intent/result action log and fails
 closed if it cannot append. A missing result after a possible mutation requires
-operator reconciliation before restart. The reverse proxy must be configured
-and integration-tested to overwrite client-supplied identity after Basic Auth.
-Linux ownership, failure-injection and end-to-end proxy checks remain release
-gates before enabling actions on a server.
+operator reconciliation before restart. The installed proxy block passed an
+isolated Basic Auth header-replacement test. Live authenticated route and
+controlled production mutation checks remain release gates.

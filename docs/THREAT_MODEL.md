@@ -1,8 +1,9 @@
 # AWG CITA threat model (0.1.0 candidate)
 
 This model covers the read-only console and the optional canary peer actions in
-the current development tree. Action mode is not yet approved for release or
-deployment. The original read-only mode remains available when actions are off.
+the current development tree. Action mode is deployed as a canary candidate but
+is not yet approved for a published release. The original read-only mode remains
+available when actions are off.
 
 ## Protected assets and permitted browser data
 
@@ -20,10 +21,10 @@ peer against the root-owned profile.
 
 ## Trust boundaries
 
-1. The public reverse proxy supplies HTTPS and authenticates operators. The
-   application currently has no independent operator identity or role check.
-   Its action session is created when the proxy forwards `GET /`; a proxy route
-   that bypasses authentication would expose the action UI and session.
+1. The public reverse proxy supplies HTTPS, authenticates operators and
+   overwrites the operator identity header. The application requires the one
+   configured account ID and binds it to the action session created by `GET /`.
+   A proxy route that bypasses authentication remains a critical failure.
 2. The rate-limit relay accepts requests from the proxy over a private Unix
    socket, forwards only the configured Host and selected headers, and connects
    to the application over another private Unix socket. Action mode refuses a
@@ -67,12 +68,12 @@ has a separate, durable JSONL intent/result log tied to one configured operator
 account. It fails closed on write failure or an unmatched intent at startup.
 The account ID cannot distinguish people who share credentials.
 
-Before action mode can be released, the exact installed server revision and
-proxy authentication route must be verified. In particular, the authenticated
-proxy must replace client-supplied identity, and Linux failure-injection tests
-must pass. Local Windows tests do not establish those properties on a live host.
-The privileged helper and its rollback must pass isolated POSIX tests before
-deployment.
+Before action mode can be released, verify the exact installed revision, the
+live authenticated route, action audit reconciliation and a controlled canary
+mutation cycle. The installed proxy block was tested in isolation for identity
+replacement; an end-to-end check of the live authenticated route and production
+rollback acceptance remain open. Linux CI exercises the privileged helper and
+failure paths against synthetic files.
 
 ## Release requirements
 

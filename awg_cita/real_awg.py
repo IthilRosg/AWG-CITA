@@ -261,6 +261,10 @@ class CanaryPeerController:
             if b'=' not in line or line.lstrip().startswith(b'#'):
                 continue
             key, value = (part.strip().decode('ascii') for part in line.split(b'=', 1))
+            # AWG permits multiple hook commands. Preserve them verbatim in
+            # the persistent config while keeping all other fields unique.
+            if key in {'PostUp', 'PostDown'}:
+                continue
             if key in fields:
                 raise ValueError('duplicate canary interface field')
             fields[key] = value
