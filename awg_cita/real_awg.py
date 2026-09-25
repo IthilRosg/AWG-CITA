@@ -438,7 +438,7 @@ class RealAwgLifecycleAdapter:
     @classmethod
     def _invoke(cls, operation: str, client_id: str | dict[str, Any] | None,
                 profile: str | None = None) -> dict[str, Any]:
-        if operation not in {'list', 'enable', 'disable', 'delete', 'create', 'config', 'config-update'}:
+        if operation not in {'list', 'server', 'enable', 'disable', 'delete', 'create', 'config', 'config-update'}:
             raise LifecycleError('invalid_request')
         if profile not in (None, 'awg2', 'wg'):
             raise LifecycleError('invalid_request')
@@ -461,7 +461,7 @@ class RealAwgLifecycleAdapter:
             argument = json.dumps(client_id, ensure_ascii=True, separators=(',', ':'))
             if len(argument) > 1024:
                 raise LifecycleError('invalid_request')
-        elif (client_id is None) != (operation == 'list') or (client_id is not None and not isinstance(client_id, str)) or (isinstance(client_id, str) and not cls._ID.fullmatch(client_id)):
+        elif (client_id is None) != (operation in {'list', 'server'}) or (client_id is not None and not isinstance(client_id, str)) or (isinstance(client_id, str) and not cls._ID.fullmatch(client_id)):
             raise LifecycleError('invalid_request')
         from .app import AwgReader
         argv = ('/usr/bin/sudo', '-n', '--', cls._HELPER, operation) if profile is None else (
@@ -520,6 +520,25 @@ class RealAwgLifecycleAdapter:
         if not isinstance(records, list) or len(records) > 64:
             raise LifecycleError('awg_command_failed')
         return [self._record(record) for record in records]
+
+    def server_settings(self) -> dict[str, Any]:
+        value = self._helper('server', None)
+        if (not isinstance(value, dict) or set(value) != {'schema_version', 'profile', 'interface', 'endpoint',
+                                                          'address', 'listenPort', 'state', 'clientCount'} or
+                type(value['schema_version']) is not int or value['schema_version'] != 1 or
+                value['profile'] not in {'awg3', 'awg2', 'wg'} or
+                value['interface'] != {'awg3': 'awg-canary0', 'awg2': 'awg-cita2', 'wg': 'awg-cita-wg'}[value['profile']] or
+                not valid_endpoint_host(value['endpoint']) or value['state'] != 'ACTIVE' or
+                type(value['listenPort']) is not int or not 1 <= value['listenPort'] <= 65535 or
+                type(value['clientCount']) is not int or not 0 <= value['clientCount'] <= 64):
+            raise LifecycleError('awg_command_failed')
+        try:
+            address = ipaddress.ip_interface(value['address'])
+        except (ValueError, TypeError) as error:
+            raise LifecycleError('awg_command_failed') from error
+        if address.version != 4:
+            raise LifecycleError('awg_command_failed')
+        return value
 
     def get_client(self, client_id: str) -> ClientRecord | None:
         return next((item for item in self.list_clients() if item['id'] == client_id), None)

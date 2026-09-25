@@ -48,6 +48,7 @@ _PROFILE_CLIENTS_RE = re.compile(r"^/api/profiles/(awg3|awg2|wg)/clients$")
 _PROFILE_ACTION_RE = re.compile(r"^/api/profiles/(awg3|awg2|wg)/clients/(peer-[0-9a-f]{16})/(disable|enable|delete)$")
 _PROFILE_CONFIG_RE = re.compile(r"^/api/profiles/(awg3|awg2|wg)/clients/(peer-[0-9a-f]{16})/config$")
 _PROFILE_TEMPLATE_RE = re.compile(r"^/api/profiles/(awg3|awg2|wg)/template$")
+_PROFILE_SERVER_RE = re.compile(r"^/api/profiles/(awg3|awg2|wg)/server$")
 _OPERATOR_ID_RE = re.compile(r"[A-Za-z0-9_.@-]{1,64}\Z")
 MAX_AWG_DUMP_BYTES = 1_048_576
 SNAPSHOT_CACHE_TTL_SECONDS = 2.0
@@ -456,6 +457,16 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             try:
                 self._json(200, _template_request(template_match.group(1)))
+            except LifecycleError as error:
+                self._json(self._lifecycle_status(error), {'error_code': error.code})
+            return
+        server_match = _PROFILE_SERVER_RE.fullmatch(self.path)
+        if server_match is not None and self.profile_services.get(server_match.group(1)) is not None:
+            if self._session_token() is None:
+                self._json(401, {'error_code': 'unauthorized'})
+                return
+            try:
+                self._json(200, self.profile_services[server_match.group(1)].server_settings())
             except LifecycleError as error:
                 self._json(self._lifecycle_status(error), {'error_code': error.code})
             return

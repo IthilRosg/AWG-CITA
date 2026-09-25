@@ -154,6 +154,20 @@ class CanaryHttpTests(unittest.TestCase):
         self.assertEqual(json.loads(self.request('GET', '/api/profiles/awg3/clients', headers={'Cookie': cookie})[2])['clients'][0]['status'], 'NEVER')
         self.assertEqual(json.loads(self.request('GET', '/api/profiles/wg/clients', headers={'Cookie': cookie})[2])['clients'], [])
 
+    def test_server_settings_requires_session(self):
+        path = '/api/profiles/awg3/server'
+        self.assertEqual(self.request('GET', path)[0], 401)
+        _, headers, _ = self.request('GET', '/')
+        cookie = headers['Set-Cookie'].split(';', 1)[0]
+        self.server.RequestHandlerClass.lifecycle_service.adapter.server_settings = lambda: {
+            'schema_version': 1, 'profile': 'awg3', 'interface': 'awg-canary0',
+            'endpoint': '127.0.0.1', 'address': '127.0.0.2/24', 'listenPort': 47192,
+            'state': 'ACTIVE', 'clientCount': 1}
+        status, fields, body = self.request('GET', path, headers={'Cookie': cookie})
+        self.assertEqual(status, 200)
+        self.assertEqual(fields['Cache-Control'], 'no-store')
+        self.assertEqual(json.loads(body)['listenPort'], 47192)
+
     def test_template_update_requires_csrf_and_is_profile_scoped(self):
         _, headers, html = self.request('GET', '/')
         csrf = re.search(r'<meta name="csrf-token" content="([^"]+)">', html).group(1)

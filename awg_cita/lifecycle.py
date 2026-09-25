@@ -247,6 +247,12 @@ class LifecycleService:
         self._deleted_ids: list[str] = []
         self._create_nonces: set[str] = set()
 
+    def server_settings(self) -> dict[str, Any]:
+        try:
+            return self.adapter.server_settings()
+        except Exception:
+            raise LifecycleError('awg_command_failed') from None
+
     def create_client(self, name: str, tags: list[str], idempotency_key: str, acknowledged: object) -> dict[str, Any]:
         """Provisioning response: never cache the secret in this service or audit its content."""
         if acknowledged is not True:
