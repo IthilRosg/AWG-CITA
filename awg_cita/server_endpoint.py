@@ -52,7 +52,7 @@ def read_request() -> tuple[str, str]:
     return validate_request(json.loads(body.decode('ascii'), object_pairs_hook=unique))
 
 
-def project_client_endpoint(text: str, endpoint: str, port: int) -> str:
+def project_client_endpoint(text: str, endpoint: str, port: int, *, expected_stored_port: int | None = None) -> str:
     """Materialize the current server host without changing stored keys or client edits."""
     if not valid_endpoint_host(endpoint) or type(port) is not int or not 1 <= port <= 65535:
         raise ValueError('invalid server endpoint')
@@ -66,7 +66,9 @@ def project_client_endpoint(text: str, endpoint: str, port: int) -> str:
             section = line
         elif line.startswith('Endpoint = '):
             match = _ENDPOINT.fullmatch(line)
-            if section != '[Peer]' or match is None or not valid_endpoint_host(match[1]) or int(match[2]) != port:
+            if (section != '[Peer]' or match is None or not valid_endpoint_host(match[1]) or
+                    not 1 <= int(match[2]) <= 65535 or
+                    (expected_stored_port is not None and int(match[2]) != expected_stored_port)):
                 raise ValueError('invalid stored endpoint')
             line = f'Endpoint = {endpoint}:{port}'
             found += 1

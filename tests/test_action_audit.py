@@ -23,7 +23,7 @@ class ActionProjectionTests(unittest.TestCase):
 
     def test_settings_actions_are_safe_and_accepted(self):
         for profile in ('awg3', 'awg2', 'wg'):
-            for operation in ('template', 'config_update', 'endpoint_update'):
+            for operation in ('template', 'config_update', 'endpoint_update', 'port_update'):
                 with self.subTest(profile=profile, operation=operation):
                     event = project_action_event(checked_at='2026-09-25T00:00:00+00:00',
                                                  **dict(EVENT, operation=profile + '_' + operation,

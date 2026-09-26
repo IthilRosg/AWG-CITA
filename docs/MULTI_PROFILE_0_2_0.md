@@ -12,7 +12,7 @@ fields separately. A saved edit replaces that client's protected `.conf` and
 regenerates its QR; it never changes keys, address, endpoint, server peer or
 obfuscation parameters. The editor checks a revision token before an atomic
 write, so a stale browser tab cannot silently overwrite a newer file. Server
-interface addresses, ports and obfuscation parameters live
+interface addresses and obfuscation parameters live
 in root-owned files and are not editable from the browser. Template updates
 use an authenticated, CSRF-protected endpoint and a fixed sudo helper. Only
 Delete retains the extra UI confirmation.
@@ -26,8 +26,8 @@ The Settings view also shows an authenticated, read-only server summary for
 each profile: interface, endpoint, interface address, listen port, active state,
 and managed client count. The fixed root helpers verify profile and runtime
 port before returning this projection. They never return private/public keys,
-raw AWG dumps, or obfuscation values. Changes to server ports, addresses, and
-obfuscation need a separate apply-and-rollback workflow.
+raw AWG dumps, or obfuscation values. Address and obfuscation changes need a
+separate client migration workflow.
 
 The endpoint host now has an authenticated editor in Settings. It changes only
 the root-owned profile metadata with an optimistic revision check, private
@@ -35,9 +35,23 @@ backup, atomic replacement, readback, and rollback on verification failure.
 VPN interfaces are not restarted. Existing saved client configurations are
 projected with the current endpoint on each download, QR, and edit; keys and
 client-specific fields are preserved. Files already imported into a client
-must be downloaded and imported again after an endpoint change. Port, address,
-and obfuscation remain read-only because they require a coordinated client and
+must be downloaded and imported again after an endpoint change. Address and
+obfuscation remain read-only because they require a coordinated client and
 runtime migration. An endpoint update does not prove external reachability.
+
+The listen port has a separate maintenance action. Its preflight rejects an
+occupied port, a pre-existing UFW rule for that port, or a missing rule for the
+current port. It opens the new UDP port before changing the persistent
+interface config and root-owned metadata, restarts only the selected interface,
+and verifies runtime port and peer inventory. On failure it restores both
+files and the old runtime, then removes the newly opened rule. A private
+operation journal restores the old state on the next helper call after an
+interrupted migration; private backups remain for manual recovery. On success
+the old UFW rule remains during the
+client migration window; remove it only after checking that clients have
+imported newly downloaded configurations. Clients using previously imported
+files disconnect when the interface switches ports. The dashboard and SSH
+service are not restarted by this action.
 
 ## Isolation and installation
 

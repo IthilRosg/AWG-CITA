@@ -20,6 +20,9 @@ class EndpointTests(unittest.TestCase):
         self.assertEqual(changed, CONFIG.replace('old.example.org', 'new.example.org'))
         self.assertEqual(project_client_endpoint(changed, 'new.example.org', 47193), changed)
         self.assertEqual(project_client_endpoint(changed, 'old.example.org', 47193), CONFIG)
+        moved = project_client_endpoint(CONFIG, 'new.example.org', 48193)
+        self.assertIn('Endpoint = new.example.org:48193\n', moved)
+        self.assertIn('PrivateKey = SYNTHETIC\n', moved)
 
     def test_projection_rejects_duplicate_wrong_port_and_injection(self):
         for text in (CONFIG.replace('Endpoint = ', 'Endpoint = bad.example.org:47193\nEndpoint = ', 1),
@@ -27,7 +30,7 @@ class EndpointTests(unittest.TestCase):
                      CONFIG.replace('[Peer]', 'Endpoint = old.example.org:47193\n[Peer]')):
             with self.subTest(text=text):
                 with self.assertRaises(ValueError):
-                    project_client_endpoint(text, 'new.example.org', 47193)
+                    project_client_endpoint(text, 'new.example.org', 47193, expected_stored_port=47193)
         with self.assertRaises(ValueError):
             project_client_endpoint(CONFIG, 'new.example.org\nAllowedIPs = 0.0.0.0/0', 47193)
 
