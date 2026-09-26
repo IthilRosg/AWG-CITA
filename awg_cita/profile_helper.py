@@ -284,8 +284,10 @@ class ProfileOps:
                 expected, endpoint = endpoint_request
                 _old_endpoint, _dns, _address, old_port, _obf = self.settings()
                 for record in controller.list_clients():
-                    project_client_endpoint(_read_root_file(self.config_path(record['id']), 2400).decode('ascii'),
-                                            _old_endpoint, old_port)
+                    path = self.config_path(record['id'])
+                    if path.exists() or path.is_symlink():
+                        project_client_endpoint(_read_root_file(path, 2400).decode('ascii'),
+                                                _old_endpoint, old_port)
                 replace_endpoint(self.profile, profile=self.name, expected_revision=expected,
                                  endpoint=endpoint, limit=2048,
                                  verify=lambda: (self.settings(), self.controller().list_clients()))

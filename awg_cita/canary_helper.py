@@ -402,8 +402,9 @@ def main(argv: list[str] | None = None) -> int:
                 _key, _route, current_endpoint, _dns, _obf, _address, current_port = _protected_peer_profile()
                 records = controller.list_clients()
                 for record in records:
-                    project_client_endpoint(_read_root_client_config(_config_path(record['id'])),
-                                            current_endpoint, current_port)
+                    path = _config_path(record['id'])
+                    if path.exists() or path.is_symlink():
+                        project_client_endpoint(_read_root_client_config(path), current_endpoint, current_port)
                 replace_endpoint(PROTECTED_PROFILE_FILE, profile='awg3', expected_revision=expected,
                                  endpoint=endpoint, limit=512,
                                  verify=lambda: (_protected_peer_profile(), _controller().list_clients()))
