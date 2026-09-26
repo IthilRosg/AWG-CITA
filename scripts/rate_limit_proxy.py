@@ -21,6 +21,12 @@ client_lock=threading.Lock(); client_tokens=6.0; client_last=time.monotonic()
 ACTION_BACKEND_TIMEOUT=330  # Longer than the app's bounded helper operation and rollback.
 CLIENT_READ_TIMEOUT=30  # Longer than the app's bounded list helper and lock wait.
 
+def post_path_allowed(path):
+ return (path=="/api/clients" or
+         re.fullmatch(r"/api/clients/peer-[0-9a-f]{16}/(?:disable|enable|delete|config)",path) is not None or
+         re.fullmatch(r"/api/profiles/(?:awg3|awg2|wg)/(?:clients(?:/peer-[0-9a-f]{16}/(?:disable|enable|delete|config))?|template|server(?:/port)?)",path) is not None or
+         re.fullmatch(r"/api/profiles/(?:awg2|wg)/server/network",path) is not None)
+
 class UnixHTTPConnection(HTTPConnection):
  def __init__(self,path,timeout):
   super().__init__("localhost",timeout=timeout)
@@ -143,9 +149,7 @@ class Handler(BaseHTTPRequestHandler):
   if self.headers.get_all("Host")!=[HOST]:self.send_error(421);return
   actor=self.operator_id()
   if actor is None:self.send_error(401);return
-  if (self.path!="/api/clients" and
-      not re.fullmatch(r"/api/clients/peer-[0-9a-f]{16}/(?:disable|enable|delete|config)",self.path) and
-      not re.fullmatch(r"/api/profiles/(?:awg3|awg2|wg)/(?:clients(?:/peer-[0-9a-f]{16}/(?:disable|enable|delete|config))?|template|server(?:/port)?)",self.path)):
+  if not post_path_allowed(self.path):
    self.send_error(404);return
   if self.headers.get_all("Origin")!=[ORIGIN]:self.send_error(403);return
   csrf=self.headers.get_all("X-CSRF-Token")

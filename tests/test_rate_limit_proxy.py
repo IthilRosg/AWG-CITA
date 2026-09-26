@@ -26,6 +26,14 @@ HOST = 'panel.example'
 COOKIE = 'awg_cita_session=synthetic-session'
 
 class TimeoutBoundaryTests(unittest.TestCase):
+    def test_network_settings_route_is_allowed_only_for_isolated_profiles(self):
+        allowed = runpy.run_path(str(RELAY))['post_path_allowed']
+        self.assertTrue(allowed('/api/profiles/awg2/server/network'))
+        self.assertTrue(allowed('/api/profiles/wg/server/network'))
+        self.assertFalse(allowed('/api/profiles/awg3/server/network'))
+        self.assertFalse(allowed('/api/profiles/wg/server/network/extra'))
+        self.assertTrue(allowed('/api/profiles/awg3/server/port'))
+
     def test_client_list_relay_deadline_exceeds_helper_and_lock(self):
         relay = runpy.run_path(str(RELAY))
         self.assertGreaterEqual(relay['CLIENT_READ_TIMEOUT'], 30)
@@ -240,6 +248,17 @@ class RateLimitRelayTests(unittest.TestCase):
         self.assertEqual(json.loads(response), {'schema_version': 1})
         self.assertEqual(len(Backend.posts), 1)
         self.assertNotIn('unrelated', Backend.posts[0][1]['Cookie'])
+
+    def test_network_settings_post_reaches_backend_only_for_awg2_and_wg(self):
+        headers = {'Cookie': COOKIE, 'Origin': 'https://' + HOST + ':8444',
+                   'X-CSRF-Token': 'synthetic-csrf', 'Content-Type': 'application/json'}
+        for profile in ('awg2', 'wg'):
+            path = f'/api/profiles/{profile}/server/network'
+            self.assertEqual(self.raw_status('POST', path, b'{}', headers), 403)
+            self.assertEqual(Backend.posts[-1][0], path)
+        forwarded = len(Backend.posts)
+        self.assertEqual(self.raw_status('POST', '/api/profiles/awg3/server/network', b'{}', headers), 404)
+        self.assertEqual(len(Backend.posts), forwarded)
 
     def test_untrusted_posts_never_reach_backend(self):
         path = '/api/clients/peer-0123456789abcdef/disable'
