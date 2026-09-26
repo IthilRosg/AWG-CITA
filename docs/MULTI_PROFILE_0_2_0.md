@@ -29,6 +29,16 @@ port before returning this projection. They never return private/public keys,
 raw AWG dumps, or obfuscation values. Changes to server ports, addresses, and
 obfuscation need a separate apply-and-rollback workflow.
 
+The endpoint host now has an authenticated editor in Settings. It changes only
+the root-owned profile metadata with an optimistic revision check, private
+backup, atomic replacement, readback, and rollback on verification failure.
+VPN interfaces are not restarted. Existing saved client configurations are
+projected with the current endpoint on each download, QR, and edit; keys and
+client-specific fields are preserved. Files already imported into a client
+must be downloaded and imported again after an endpoint change. Port, address,
+and obfuscation remain read-only because they require a coordinated client and
+runtime migration. An endpoint update does not prove external reachability.
+
 ## Isolation and installation
 
 `awg-cita2` and `awg-cita-wg` are independent interfaces and systemd services.

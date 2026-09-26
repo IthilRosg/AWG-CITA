@@ -22,7 +22,8 @@ _MAX_RECORD_BYTES = 512
 _ACTION_OPERATIONS = frozenset({"create", "enable", "disable", "delete"} |
                                {f'{profile}_{operation}' for profile in ('awg2', 'wg')
                                 for operation in ('create', 'enable', 'disable', 'delete')} |
-                               {f'{profile}_template' for profile in ('awg3', 'awg2', 'wg')})
+                               {f'{profile}_{operation}' for profile in ('awg3', 'awg2', 'wg')
+                                for operation in ('template', 'config_update', 'endpoint_update')})
 _ACTION_RESULTS = frozenset({"OK", "invalid_request", "client_not_found", "invalid_state", "conflict",
                              "internal_error", "awg_timeout", "configuration_failed", "awg_command_failed"})
 _ACTOR_RE = re.compile(r"[A-Za-z0-9_.@-]{1,64}\Z")
