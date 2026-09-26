@@ -21,6 +21,16 @@ class ActionProjectionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             project_action_event(checked_at='2026-09-25T00:00:00+00:00', **dict(EVENT, actor='bad actor'))
 
+    def test_settings_actions_are_safe_and_accepted(self):
+        for profile in ('awg3', 'awg2', 'wg'):
+            for operation in ('template', 'config_update', 'endpoint_update'):
+                with self.subTest(profile=profile, operation=operation):
+                    event = project_action_event(checked_at='2026-09-25T00:00:00+00:00',
+                                                 **dict(EVENT, operation=profile + '_' + operation,
+                                                        client_id=''))
+                    self.assertEqual(event['operation'], profile + '_' + operation)
+                    self.assertNotIn('endpoint', event)
+
 
 @unittest.skipUnless(os.name == 'posix', 'POSIX file ownership semantics required')
 class ActionFileTests(unittest.TestCase):
