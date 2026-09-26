@@ -821,6 +821,9 @@
     async updateServerPort(profile, expectedRevision, listenPort) {
       return this.request(`/api/profiles/${profile}/server/port`, { expectedRevision, listenPort, idempotencyKey: crypto.randomUUID() });
     }
+    async updateServerNetwork(profile, expectedRevision, change) {
+      return this.request(`/api/profiles/${profile}/server/network`, { expectedRevision, ...change, idempotencyKey: crypto.randomUUID() });
+    }
     async updateTemplate(profile, template) { return this.request(`/api/profiles/${profile}/template`, { ...template, idempotencyKey: crypto.randomUUID() }); }
   }
 
@@ -2280,15 +2283,17 @@
   async function loadServerSettings() {
     const ru = state.locale === 'ru';
     $('server-settings-title').textContent = ru ? 'Интерфейсы сервера' : 'Server interfaces';
-    $('server-settings-note').textContent = ru ? 'Endpoint меняется без перезапуска. Перенос UDP порта перезапускает выбранный интерфейс и отключит старые клиентские файлы: после переноса скачайте конфиги заново. Старое правило firewall остаётся для отката. Адрес интерфейса и обфускация пока доступны только для просмотра.' : 'The endpoint changes without a restart. Moving a UDP port restarts the selected interface and disconnects old client files: download configs again afterward. The old firewall rule remains for rollback. Interface address and obfuscation are read only.';
+    $('server-settings-note').textContent = ru ? 'Endpoint меняется без перезапуска. Порт, адрес и обфускация перезапускают выбранный интерфейс; после изменения скачайте конфиги заново. AWG 3.1 пока доступен только для endpoint и порта.' : 'Endpoint changes without a restart. Port, address and obfuscation restart the selected interface; download client configs again afterward. AWG 3.1 currently supports endpoint and port changes only.';
     $('client-defaults-title').textContent = ru ? 'Шаблоны конфигов' : 'Client config templates';
     for (const profile of ['awg3', 'awg2', 'wg']) {
       const content = document.querySelector(`[data-server-profile="${profile}"] .server-settings-content`);
       const form = document.querySelector(`[data-endpoint-profile="${profile}"]`);
       const portForm = document.querySelector(`[data-port-profile="${profile}"]`);
+      const addressForm = document.querySelector(`[data-address-profile="${profile}"]`);
+      const obfuscationForm = document.querySelector(`[data-obfuscation-profile="${profile}"]`);
       form.querySelector('button').textContent = ru ? 'Сохранить endpoint' : 'Save endpoint';
       portForm.querySelector('button').textContent = ru ? 'Перенести порт' : 'Move port';
-      if (!realCanary) { content.textContent = ru ? 'Доступно только на сервере' : 'Available on server only'; form.hidden = true; portForm.hidden = true; continue; }
+      if (!realCanary) { content.textContent = ru ? 'Доступно только на сервере' : 'Available on server only'; form.hidden = true; portForm.hidden = true; if (addressForm) addressForm.hidden = true; if (obfuscationForm) obfuscationForm.hidden = true; continue; }
       try {
         const value = await adapter.getServerSettings(profile);
         if (value?.schema_version !== 1 || value.profile !== profile || value.state !== 'ACTIVE' || !/^[0-9a-f]{64}$/.test(value.revision)) throw new Error('invalid_server_settings');
@@ -2301,6 +2306,21 @@
         portForm.dataset.currentPort = String(value.listenPort);
         portForm.elements.namedItem('listenPort').value = String(value.listenPort);
         portForm.querySelector('button').disabled = false;
+        if (addressForm) {
+          addressForm.hidden = false;
+          addressForm.dataset.revision = value.revision;
+          addressForm.dataset.currentAddress = value.address;
+          addressForm.elements.namedItem('address').value = value.address;
+          addressForm.querySelector('button').disabled = false;
+        }
+        if (obfuscationForm) {
+          obfuscationForm.hidden = !value.obfuscation;
+          obfuscationForm.dataset.revision = value.revision;
+          obfuscationForm.dataset.currentObfuscation = JSON.stringify(value.obfuscation || {});
+          for (const key of ['S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4'])
+            obfuscationForm.elements.namedItem(key).value = value.obfuscation?.[key] || '';
+          obfuscationForm.querySelector('button').disabled = !value.obfuscation;
+        }
         content.replaceChildren();
         const rows = [
           [ru ? 'Состояние' : 'State', ru ? 'Работает' : 'Active'],
@@ -2315,7 +2335,7 @@
           const item = document.createElement('b'); item.textContent = data;
           row.append(caption, item); content.append(row);
         }
-      } catch (_error) { content.textContent = ru ? 'Не удалось получить состояние' : 'Status unavailable'; form.querySelector('button').disabled = true; portForm.querySelector('button').disabled = true; }
+      } catch (_error) { content.textContent = ru ? 'Не удалось получить состояние' : 'Status unavailable'; form.querySelector('button').disabled = true; portForm.querySelector('button').disabled = true; if (addressForm) addressForm.querySelector('button').disabled = true; if (obfuscationForm) obfuscationForm.querySelector('button').disabled = true; }
     }
   }
 
@@ -2356,6 +2376,29 @@
     } catch (_error) {
       status.textContent = state.locale === 'ru' ? 'Перенос не выполнен. Проверьте состояние.' : 'Move failed. Check server status.';
       await loadServerSettings();
+    } finally { button.disabled = false; }
+  }
+
+  async function saveServerNetwork(form, kind) {
+    const profile = kind === 'address' ? form.dataset.addressProfile : form.dataset.obfuscationProfile;
+    const status = document.querySelector(`[data-${kind}-status="${profile}"]`);
+    const button = form.querySelector('button[type="submit"]');
+    if (!realCanary || !/^[0-9a-f]{64}$/.test(form.dataset.revision || '')) return;
+    const change = kind === 'address' ? { address: form.elements.namedItem('address').value.trim() } :
+      { obfuscation: Object.fromEntries(['S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4'].map(key => [key, form.elements.namedItem(key).value.trim()])) };
+    if (kind === 'address' && change.address === form.dataset.currentAddress) return;
+    if (kind === 'obfuscation' && JSON.stringify(change.obfuscation) === form.dataset.currentObfuscation) return;
+    button.disabled = true;
+    status.textContent = state.locale === 'ru' ? 'Применяю…' : 'Applying…';
+    try {
+      const value = await adapter.updateServerNetwork(profile, form.dataset.revision, change);
+      if (value?.schema_version !== 1 || value.profile !== profile || (kind === 'address' ? value.address !== change.address :
+          JSON.stringify(value.obfuscation) !== JSON.stringify(change.obfuscation))) throw new Error('invalid_server_settings');
+      await loadServerSettings();
+      status.textContent = state.locale === 'ru' ? 'Применено. Скачайте конфиги заново.' : 'Applied. Download client configs again.';
+    } catch (_error) {
+      await loadServerSettings();
+      status.textContent = state.locale === 'ru' ? 'Не удалось применить. Проверьте состояние интерфейса.' : 'Apply failed. Check interface status.';
     } finally { button.disabled = false; }
   }
 
@@ -2668,6 +2711,10 @@
   document.addEventListener('submit', (event) => {
     const portForm = event.target.closest('[data-port-profile]');
     if (portForm) { event.preventDefault(); saveServerPort(portForm); return; }
+    const addressForm = event.target.closest('[data-address-profile]');
+    if (addressForm) { event.preventDefault(); saveServerNetwork(addressForm, 'address'); return; }
+    const obfuscationForm = event.target.closest('[data-obfuscation-profile]');
+    if (obfuscationForm) { event.preventDefault(); saveServerNetwork(obfuscationForm, 'obfuscation'); return; }
     const endpointForm = event.target.closest('[data-endpoint-profile]');
     if (endpointForm) { event.preventDefault(); saveServerEndpoint(endpointForm); return; }
     if (event.target.id === 'config-edit-form') {

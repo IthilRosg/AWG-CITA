@@ -173,6 +173,42 @@ class ProfileOps:
             if started.returncode:
                 raise ValueError('profile restart failed')
 
+    def stop_runtime(self) -> None:
+        result = subprocess.run(('/usr/bin/systemctl', 'stop', self.service),
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                timeout=30, env=_ENV)
+        if result.returncode:
+            raise ValueError('profile stop failed')
+
+    def start_runtime(self) -> None:
+        result = subprocess.run(('/usr/bin/systemctl', 'reset-failed', self.service),
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                timeout=5, env=_ENV)
+        if result.returncode:
+            raise ValueError('profile reset failed')
+        result = subprocess.run(('/usr/bin/systemctl', 'start', self.service),
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                timeout=30, env=_ENV)
+        if result.returncode:
+            raise ValueError('profile start failed')
+
+    def verify_runtime(self) -> None:
+        _endpoint, _dns, address, port, _obf = self.settings()
+        runtime = self.read_dump().splitlines()[0].split('\t')
+        if len(runtime) < 3 or runtime[2] != str(port):
+            raise ValueError('profile runtime port drift')
+        result = subprocess.run(('/usr/sbin/ip', '-j', '-4', 'address', 'show', 'dev', self.interface),
+                                capture_output=True, timeout=5, env=_ENV)
+        if result.returncode or len(result.stdout) > 8192:
+            raise ValueError('profile runtime address unavailable')
+        interfaces = json.loads(result.stdout)
+        parsed = ipaddress.ip_interface(address)
+        if (not isinstance(interfaces, list) or len(interfaces) != 1 or
+                not any(item.get('local') == str(parsed.ip) and item.get('prefixlen') == parsed.network.prefixlen
+                        for item in interfaces[0].get('addr_info', []))):
+            raise ValueError('profile runtime address drift')
+        self.controller().list_clients()
+
     def key(self, args: tuple[str, ...], input_key: str | None = None) -> str:
         return _valid_key(self.command((AWG, *args), input_key=input_key, limit=64).strip())
 
@@ -269,8 +305,14 @@ class ProfileOps:
         if operation == 'port-update':
             from .server_port import read_request
             port_request = read_request()
+        network_request = None
+        if operation == 'network-update':
+            from .server_network import read_request
+            network_request = read_request(self.name)
         with self.locked():
             self.recover_port_migration()
+            from .server_network import recover_pending
+            recover_pending(self)
             controller = self.controller()
             if operation == 'list':
                 return {'schema_version': 1, 'clients': controller.list_clients()}
@@ -283,7 +325,8 @@ class ProfileOps:
                 return {'schema_version': 1, 'profile': self.name, 'interface': self.interface,
                         'endpoint': endpoint, 'address': address, 'listenPort': port,
                         'state': 'ACTIVE', 'clientCount': len(controller.list_clients()),
-                        'revision': revision(read_root_settings(self.profile, 2048))}
+                        'revision': revision(read_root_settings(self.profile, 2048)),
+                        **({'obfuscation': _obf} if self.name == 'awg2' else {})}
             if operation == 'endpoint-update':
                 from .server_endpoint import project_client_endpoint, read_root_settings, replace_endpoint, revision
                 expected, endpoint = endpoint_request
@@ -300,7 +343,8 @@ class ProfileOps:
                 return {'schema_version': 1, 'profile': self.name, 'interface': self.interface,
                         'endpoint': endpoint, 'address': address, 'listenPort': port,
                         'state': 'ACTIVE', 'clientCount': len(self.controller().list_clients()),
-                        'revision': revision(read_root_settings(self.profile, 2048))}
+                        'revision': revision(read_root_settings(self.profile, 2048)),
+                        **({'obfuscation': _obf} if self.name == 'awg2' else {})}
             if operation == 'port-update':
                 from .server_endpoint import project_client_endpoint, read_root_settings, revision
                 from .server_port import apply_port
@@ -326,7 +370,19 @@ class ProfileOps:
                 return {'schema_version': 1, 'profile': self.name, 'interface': self.interface,
                         'endpoint': endpoint, 'address': address, 'listenPort': port,
                         'state': 'ACTIVE', 'clientCount': len(self.controller().list_clients()),
-                        'revision': revision(read_root_settings(self.profile, 2048))}
+                        'revision': revision(read_root_settings(self.profile, 2048)),
+                        **({'obfuscation': _obf} if self.name == 'awg2' else {})}
+            if operation == 'network-update':
+                from .server_endpoint import read_root_settings, revision
+                from .server_network import apply_change
+                expected, kind, target = network_request
+                apply_change(self, expected, kind, target)
+                endpoint, _dns, address, port, _obf = self.settings()
+                return {'schema_version': 1, 'profile': self.name, 'interface': self.interface,
+                        'endpoint': endpoint, 'address': address, 'listenPort': port,
+                        'state': 'ACTIVE', 'clientCount': len(self.controller().list_clients()),
+                        'revision': revision(read_root_settings(self.profile, 2048)),
+                        **({'obfuscation': _obf} if self.name == 'awg2' else {})}
             if operation == 'create':
                 return controller.create(request['name'], request['tags'], request['idempotencyKey'],
                                          lambda: (private := self.key(('genkey',)), self.key(('pubkey',), private)),
@@ -357,7 +413,7 @@ class ProfileOps:
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     if (os.geteuid() != 0 or len(args) not in (2, 3) or args[0] not in _INTERFACES or
-        not ((len(args) == 2 and args[1] in {'list', 'server', 'create', 'endpoint-update', 'port-update'}) or
+        not ((len(args) == 2 and args[1] in {'list', 'server', 'create', 'endpoint-update', 'port-update', 'network-update'}) or
              (len(args) == 3 and args[1] in {'config', 'config-update', 'enable', 'disable', 'delete'} and _ID.fullmatch(args[2])))):
         print('invalid profile operation', file=sys.stderr)
         return 64

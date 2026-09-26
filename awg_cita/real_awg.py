@@ -433,16 +433,17 @@ class RealAwgLifecycleAdapter:
                  *, profile: str | None = None) -> None:
         if profile not in (None, 'awg2', 'wg'):
             raise ValueError('invalid peer profile')
+        self._profile = profile
         self._helper = helper or (lambda operation, client_id: self._invoke(operation, client_id, profile))
 
     @classmethod
     def _invoke(cls, operation: str, client_id: str | dict[str, Any] | None,
                 profile: str | None = None) -> dict[str, Any]:
-        if operation not in {'list', 'server', 'endpoint-update', 'port-update', 'enable', 'disable', 'delete', 'create', 'config', 'config-update'}:
+        if operation not in {'list', 'server', 'endpoint-update', 'port-update', 'network-update', 'enable', 'disable', 'delete', 'create', 'config', 'config-update'}:
             raise LifecycleError('invalid_request')
         if profile not in (None, 'awg2', 'wg'):
             raise LifecycleError('invalid_request')
-        if operation in {'create', 'config-update', 'endpoint-update', 'port-update'}:
+        if operation in {'create', 'config-update', 'endpoint-update', 'port-update', 'network-update'}:
             if operation == 'create':
                 valid = (isinstance(client_id, dict) and set(client_id) == {'name', 'tags', 'idempotencyKey'} and
                          isinstance(client_id['name'], str) and isinstance(client_id['tags'], list) and
@@ -458,6 +459,13 @@ class RealAwgLifecycleAdapter:
                 from .server_port import validate_request
                 try:
                     validate_request(client_id)
+                    valid = True
+                except (ValueError, TypeError):
+                    valid = False
+            elif operation == 'network-update':
+                from .server_network import validate_request
+                try:
+                    validate_request(client_id, profile)
                     valid = True
                 except (ValueError, TypeError):
                     valid = False
@@ -480,7 +488,7 @@ class RealAwgLifecycleAdapter:
         from .app import AwgReader
         argv = ('/usr/bin/sudo', '-n', '--', cls._HELPER, operation) if profile is None else (
             '/usr/bin/sudo', '-n', '--', '/usr/local/sbin/awg-cita-profile', profile, operation)
-        if operation in {'create', 'config-update', 'endpoint-update', 'port-update'}:
+        if operation in {'create', 'config-update', 'endpoint-update', 'port-update', 'network-update'}:
             if operation == 'config-update':
                 argv += (client_id['clientId'],)
                 argument = json.dumps({'expectedRevision': client_id['expectedRevision'], 'settings': client_id['settings']},
@@ -488,6 +496,8 @@ class RealAwgLifecycleAdapter:
             elif operation == 'endpoint-update':
                 argument = json.dumps(client_id, ensure_ascii=True, separators=(',', ':'))
             elif operation == 'port-update':
+                argument = json.dumps(client_id, ensure_ascii=True, separators=(',', ':'))
+            elif operation == 'network-update':
                 argument = json.dumps(client_id, ensure_ascii=True, separators=(',', ':'))
             out, err = AwgReader._run(argv, ACTION_HELPER_TIMEOUT, argument.encode('ascii'))
         elif client_id is not None:
@@ -545,8 +555,9 @@ class RealAwgLifecycleAdapter:
 
     @staticmethod
     def _validate_server_settings(value: Any) -> dict[str, Any]:
-        if (not isinstance(value, dict) or set(value) != {'schema_version', 'profile', 'interface', 'endpoint',
-                                                          'address', 'listenPort', 'state', 'clientCount', 'revision'} or
+        keys = {'schema_version', 'profile', 'interface', 'endpoint',
+                'address', 'listenPort', 'state', 'clientCount', 'revision'}
+        if (not isinstance(value, dict) or set(value) not in (keys, keys | {'obfuscation'}) or
                 type(value['schema_version']) is not int or value['schema_version'] != 1 or
                 value['profile'] not in {'awg3', 'awg2', 'wg'} or
                 value['interface'] != {'awg3': 'awg-canary0', 'awg2': 'awg-cita2', 'wg': 'awg-cita-wg'}[value['profile']] or
@@ -561,6 +572,14 @@ class RealAwgLifecycleAdapter:
             raise LifecycleError('awg_command_failed') from error
         if address.version != 4:
             raise LifecycleError('awg_command_failed')
+        if 'obfuscation' in value:
+            from .server_network import validate_obfuscation
+            try:
+                if value['profile'] != 'awg2':
+                    raise ValueError('unexpected obfuscation')
+                validate_obfuscation(value['obfuscation'])
+            except ValueError as error:
+                raise LifecycleError('awg_command_failed') from error
         return value
 
     def update_server_endpoint(self, expected_revision: str, endpoint: str) -> dict[str, Any]:
@@ -574,6 +593,13 @@ class RealAwgLifecycleAdapter:
         from .server_port import validate_request
         validate_request({'expectedRevision': expected_revision, 'listenPort': listen_port})
         value = self._helper('port-update', {'expectedRevision': expected_revision, 'listenPort': listen_port})
+        return self._validate_server_settings(value)
+
+    def update_server_network(self, expected_revision: str, kind: str, target: object) -> dict[str, Any]:
+        from .server_network import validate_request
+        request = {'expectedRevision': expected_revision, kind: target}
+        validate_request(request, self._profile)
+        value = self._helper('network-update', request)
         return self._validate_server_settings(value)
 
     def get_client(self, client_id: str) -> ClientRecord | None:

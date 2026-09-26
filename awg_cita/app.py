@@ -50,6 +50,7 @@ _PROFILE_CONFIG_RE = re.compile(r"^/api/profiles/(awg3|awg2|wg)/clients/(peer-[0
 _PROFILE_TEMPLATE_RE = re.compile(r"^/api/profiles/(awg3|awg2|wg)/template$")
 _PROFILE_SERVER_RE = re.compile(r"^/api/profiles/(awg3|awg2|wg)/server$")
 _PROFILE_SERVER_PORT_RE = re.compile(r"^/api/profiles/(awg3|awg2|wg)/server/port$")
+_PROFILE_SERVER_NETWORK_RE = re.compile(r"^/api/profiles/(awg2|wg)/server/network$")
 _OPERATOR_ID_RE = re.compile(r"[A-Za-z0-9_.@-]{1,64}\Z")
 MAX_AWG_DUMP_BYTES = 1_048_576
 SNAPSHOT_CACHE_TTL_SECONDS = 2.0
@@ -541,6 +542,7 @@ class _Handler(BaseHTTPRequestHandler):
         template_match = _PROFILE_TEMPLATE_RE.fullmatch(path)
         server_match = _PROFILE_SERVER_RE.fullmatch(path)
         server_port_match = _PROFILE_SERVER_PORT_RE.fullmatch(path)
+        server_network_match = _PROFILE_SERVER_NETWORK_RE.fullmatch(path)
         profile_config = _PROFILE_CONFIG_RE.fullmatch(path)
         canary_config = _CANARY_CONFIG_RE.fullmatch(path)
         match = _CANARY_ROUTE_RE.fullmatch(path)
@@ -549,8 +551,9 @@ class _Handler(BaseHTTPRequestHandler):
                    self.profile_services.get(profile_list.group(1)) if profile_list else
                    self.profile_services.get(server_match.group(1)) if server_match else
                    self.profile_services.get(server_port_match.group(1)) if server_port_match else
+                   self.profile_services.get(server_network_match.group(1)) if server_network_match else
                    self.profile_services.get(profile_config.group(1)) if profile_config else self.lifecycle_service)
-        if (match is None and profile_match is None and not create and template_match is None and server_match is None and server_port_match is None and
+        if (match is None and profile_match is None and not create and template_match is None and server_match is None and server_port_match is None and server_network_match is None and
                 profile_config is None and canary_config is None) or service is None:
             self._json(404, {'error_code': 'not_found'})
             return
@@ -595,13 +598,15 @@ class _Handler(BaseHTTPRequestHandler):
 
         try:
             payload = json.loads(body, object_pairs_hook=unique_pairs)
-            operation = ('template' if template_match else 'endpoint_update' if server_match else 'port_update' if server_port_match else 'create' if create else 'config_update' if profile_config or canary_config else
+            operation = ('template' if template_match else 'endpoint_update' if server_match else 'port_update' if server_port_match else 'network_update' if server_network_match else 'create' if create else 'config_update' if profile_config or canary_config else
                          profile_match.group(3) if profile_match else match.group(2))
-            client_id = ('' if create or template_match or server_match or server_port_match else profile_config.group(2) if profile_config else
+            client_id = ('' if create or template_match or server_match or server_port_match or server_network_match else profile_config.group(2) if profile_config else
                          canary_config.group(1) if canary_config else profile_match.group(2) if profile_match else match.group(1))
             keys = ({'dns_server', 'allowed_ips', 'mtu', 'keepalive', 'idempotencyKey'} if template_match else
                     {'expectedRevision', 'endpoint', 'idempotencyKey'} if server_match else
                     {'expectedRevision', 'listenPort', 'idempotencyKey'} if server_port_match else
+                    {'expectedRevision', 'address', 'idempotencyKey'} if server_network_match and 'address' in payload else
+                    {'expectedRevision', 'obfuscation', 'idempotencyKey'} if server_network_match else
                     {'name', 'tags', 'idempotencyKey', 'acknowledged'} if create else
                     {'dns_server', 'allowed_ips', 'mtu', 'keepalive', 'expectedRevision', 'idempotencyKey'} if operation == 'config_update' else
                     {'disable': {'idempotencyKey', 'reason'}, 'enable': {'idempotencyKey'},
@@ -617,6 +622,10 @@ class _Handler(BaseHTTPRequestHandler):
             if server_port_match:
                 from .server_port import validate_request
                 validate_request({key: payload[key] for key in ('expectedRevision', 'listenPort')})
+            if server_network_match:
+                from .server_network import validate_request
+                validate_request({key: value for key, value in payload.items() if key != 'idempotencyKey'},
+                                 server_network_match.group(1))
             if operation == 'config_update':
                 from .client_config_edit import validate_revision
                 from .client_templates import validate
@@ -629,9 +638,9 @@ class _Handler(BaseHTTPRequestHandler):
         actor = self._operator_actor()
         correlation_id = secrets.token_hex(16)
         nonce_digest = hashlib.sha256(payload['idempotencyKey'].encode('utf-8')).hexdigest()
-        audit_profile = (template_match.group(1) if template_match else server_match.group(1) if server_match else server_port_match.group(1) if server_port_match else profile_config.group(1) if profile_config else profile_match.group(1) if profile_match else
+        audit_profile = (template_match.group(1) if template_match else server_match.group(1) if server_match else server_port_match.group(1) if server_port_match else server_network_match.group(1) if server_network_match else profile_config.group(1) if profile_config else profile_match.group(1) if profile_match else
                          profile_list.group(1) if profile_list else 'awg3')
-        audit_operation = audit_profile + '_' + operation if template_match or server_match or server_port_match or audit_profile != 'awg3' else operation
+        audit_operation = audit_profile + '_' + operation if template_match or server_match or server_port_match or server_network_match or audit_profile != 'awg3' else operation
         if self.action_audit_log is not None:
             try:
                 self.action_audit_log.record_action(phase='INTENT', correlation_id=correlation_id,
@@ -648,6 +657,10 @@ class _Handler(BaseHTTPRequestHandler):
                 result = service.update_server_endpoint(payload['expectedRevision'], payload['endpoint'], payload['idempotencyKey'])
             elif server_port_match:
                 result = service.update_server_port(payload['expectedRevision'], payload['listenPort'], payload['idempotencyKey'])
+            elif server_network_match:
+                kind = 'address' if 'address' in payload else 'obfuscation'
+                result = service.update_server_network(payload['expectedRevision'], kind, payload[kind],
+                                                       payload['idempotencyKey'])
             elif operation == 'config_update':
                 result = service.update_configuration(client_id, payload['expectedRevision'],
                                                       {key: payload[key] for key in ('dns_server', 'allowed_ips', 'mtu', 'keepalive')},
