@@ -455,12 +455,12 @@ INDEX_HTML = """<!doctype html>
         <div class="section-heading server-settings-heading"><div>
           <div class="eyebrow">SERVER / LIVE STATE</div>
           <h3 id="server-settings-title">Интерфейсы сервера</h3>
-          <p id="server-settings-note" class="section-subtitle">Рабочие параметры. Изменение порта, адреса или обфускации требует отдельного применения.</p>
+          <p id="server-settings-note" class="section-subtitle">Endpoint применяется к новым выдачам конфигов без перезапуска VPN. Уже импортированные файлы нужно скачать заново. Порт, адрес и обфускация пока доступны только для просмотра.</p>
         </div></div>
         <div class="profile-settings-grid server-settings-grid">
-          <div class="panel server-settings-card" data-server-profile="awg3"><strong>AWG 3.1</strong><div class="server-settings-content" role="status">Загрузка…</div></div>
-          <div class="panel server-settings-card" data-server-profile="awg2"><strong>AWG 2.0</strong><div class="server-settings-content" role="status">Загрузка…</div></div>
-          <div class="panel server-settings-card" data-server-profile="wg"><strong>WireGuard</strong><div class="server-settings-content" role="status">Загрузка…</div></div>
+          <div class="panel server-settings-card" data-server-profile="awg3"><strong>AWG 3.1</strong><div class="server-settings-content" role="status">Загрузка…</div><form class="server-endpoint-form" data-endpoint-profile="awg3"><label>Endpoint host<input name="endpoint" autocomplete="off" required maxlength="253"></label><div class="profile-settings-actions"><span data-endpoint-status="awg3" role="status"></span><button class="button" type="submit">Сохранить endpoint</button></div></form></div>
+          <div class="panel server-settings-card" data-server-profile="awg2"><strong>AWG 2.0</strong><div class="server-settings-content" role="status">Загрузка…</div><form class="server-endpoint-form" data-endpoint-profile="awg2"><label>Endpoint host<input name="endpoint" autocomplete="off" required maxlength="253"></label><div class="profile-settings-actions"><span data-endpoint-status="awg2" role="status"></span><button class="button" type="submit">Сохранить endpoint</button></div></form></div>
+          <div class="panel server-settings-card" data-server-profile="wg"><strong>WireGuard</strong><div class="server-settings-content" role="status">Загрузка…</div><form class="server-endpoint-form" data-endpoint-profile="wg"><label>Endpoint host<input name="endpoint" autocomplete="off" required maxlength="253"></label><div class="profile-settings-actions"><span data-endpoint-status="wg" role="status"></span><button class="button" type="submit">Сохранить endpoint</button></div></form></div>
         </div>
         <div class="section-heading server-settings-heading"><div>
           <div class="eyebrow">CLIENT / DEFAULTS</div>

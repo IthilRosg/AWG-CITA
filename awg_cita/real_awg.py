@@ -438,15 +438,22 @@ class RealAwgLifecycleAdapter:
     @classmethod
     def _invoke(cls, operation: str, client_id: str | dict[str, Any] | None,
                 profile: str | None = None) -> dict[str, Any]:
-        if operation not in {'list', 'server', 'enable', 'disable', 'delete', 'create', 'config', 'config-update'}:
+        if operation not in {'list', 'server', 'endpoint-update', 'enable', 'disable', 'delete', 'create', 'config', 'config-update'}:
             raise LifecycleError('invalid_request')
         if profile not in (None, 'awg2', 'wg'):
             raise LifecycleError('invalid_request')
-        if operation in {'create', 'config-update'}:
+        if operation in {'create', 'config-update', 'endpoint-update'}:
             if operation == 'create':
                 valid = (isinstance(client_id, dict) and set(client_id) == {'name', 'tags', 'idempotencyKey'} and
                          isinstance(client_id['name'], str) and isinstance(client_id['tags'], list) and
                          isinstance(client_id['idempotencyKey'], str))
+            elif operation == 'endpoint-update':
+                from .server_endpoint import validate_request
+                try:
+                    validate_request(client_id)
+                    valid = True
+                except (ValueError, TypeError):
+                    valid = False
             else:
                 from .client_config_edit import validate_revision
                 from .client_templates import validate
@@ -466,11 +473,13 @@ class RealAwgLifecycleAdapter:
         from .app import AwgReader
         argv = ('/usr/bin/sudo', '-n', '--', cls._HELPER, operation) if profile is None else (
             '/usr/bin/sudo', '-n', '--', '/usr/local/sbin/awg-cita-profile', profile, operation)
-        if operation in {'create', 'config-update'}:
+        if operation in {'create', 'config-update', 'endpoint-update'}:
             if operation == 'config-update':
                 argv += (client_id['clientId'],)
                 argument = json.dumps({'expectedRevision': client_id['expectedRevision'], 'settings': client_id['settings']},
                                       ensure_ascii=True, separators=(',', ':'))
+            elif operation == 'endpoint-update':
+                argument = json.dumps(client_id, ensure_ascii=True, separators=(',', ':'))
             out, err = AwgReader._run(argv, ACTION_HELPER_TIMEOUT, argument.encode('ascii'))
         elif client_id is not None:
             argv += (client_id,)
@@ -523,14 +532,19 @@ class RealAwgLifecycleAdapter:
 
     def server_settings(self) -> dict[str, Any]:
         value = self._helper('server', None)
+        return self._validate_server_settings(value)
+
+    @staticmethod
+    def _validate_server_settings(value: Any) -> dict[str, Any]:
         if (not isinstance(value, dict) or set(value) != {'schema_version', 'profile', 'interface', 'endpoint',
-                                                          'address', 'listenPort', 'state', 'clientCount'} or
+                                                          'address', 'listenPort', 'state', 'clientCount', 'revision'} or
                 type(value['schema_version']) is not int or value['schema_version'] != 1 or
                 value['profile'] not in {'awg3', 'awg2', 'wg'} or
                 value['interface'] != {'awg3': 'awg-canary0', 'awg2': 'awg-cita2', 'wg': 'awg-cita-wg'}[value['profile']] or
                 not valid_endpoint_host(value['endpoint']) or value['state'] != 'ACTIVE' or
                 type(value['listenPort']) is not int or not 1 <= value['listenPort'] <= 65535 or
-                type(value['clientCount']) is not int or not 0 <= value['clientCount'] <= 64):
+                type(value['clientCount']) is not int or not 0 <= value['clientCount'] <= 64 or
+                not isinstance(value['revision'], str) or not re.fullmatch(r'[0-9a-f]{64}', value['revision'])):
             raise LifecycleError('awg_command_failed')
         try:
             address = ipaddress.ip_interface(value['address'])
@@ -539,6 +553,13 @@ class RealAwgLifecycleAdapter:
         if address.version != 4:
             raise LifecycleError('awg_command_failed')
         return value
+
+    def update_server_endpoint(self, expected_revision: str, endpoint: str) -> dict[str, Any]:
+        from .server_endpoint import validate_request
+        validate_request({'expectedRevision': expected_revision, 'endpoint': endpoint})
+        value = self._helper('endpoint-update', {'expectedRevision': expected_revision, 'endpoint': endpoint})
+        # Reuse the strict projection validation.
+        return self._validate_server_settings(value)
 
     def get_client(self, client_id: str) -> ClientRecord | None:
         return next((item for item in self.list_clients() if item['id'] == client_id), None)

@@ -234,6 +234,9 @@ class ProfileOps:
         if ('peer-' + hashlib.sha256(base64.b64decode(public)).hexdigest()[:16] != client_id or
                 fields.get('PublicKey') != server_public):
             raise ValueError('stored client config mismatch')
+        from .server_endpoint import project_client_endpoint
+        endpoint, _dns, _address, port, _obf = self.settings()
+        config_text = project_client_endpoint(config_text, endpoint, port)
         import segno
         qr_uri = segno.make_qr(config_text).png_data_uri(scale=4)
         return {'schema_version': 1, 'client': client, 'configText': config_text, 'qrDataUri': qr_uri,
@@ -247,7 +250,8 @@ class ProfileOps:
             raise ValueError('saved configuration changed')
         replacement = replace_editable(current['configText'], settings)
         if replacement != current['configText']:
-            atomic_replace(self.config_path(client_id), current['configText'], replacement)
+            raw = _read_root_file(self.config_path(client_id), 2400).decode('ascii')
+            atomic_replace(self.config_path(client_id), raw, replacement)
         return self.load_config(client_id, controller)
 
     def execute(self, args: list[str]) -> dict[str, object]:
@@ -257,18 +261,39 @@ class ProfileOps:
         if operation == 'config-update':
             from .client_config_edit import read_update_request
             update_request = read_update_request()
+        endpoint_request = None
+        if operation == 'endpoint-update':
+            from .server_endpoint import read_request
+            endpoint_request = read_request()
         with self.locked():
             controller = self.controller()
             if operation == 'list':
                 return {'schema_version': 1, 'clients': controller.list_clients()}
             if operation == 'server':
+                from .server_endpoint import read_root_settings, revision
                 endpoint, _dns, address, port, _obf = self.settings()
                 runtime = self.read_dump().splitlines()[0].split('\t')
                 if len(runtime) < 3 or runtime[2] != str(port):
                     raise ValueError('profile runtime drift')
                 return {'schema_version': 1, 'profile': self.name, 'interface': self.interface,
                         'endpoint': endpoint, 'address': address, 'listenPort': port,
-                        'state': 'ACTIVE', 'clientCount': len(controller.list_clients())}
+                        'state': 'ACTIVE', 'clientCount': len(controller.list_clients()),
+                        'revision': revision(read_root_settings(self.profile, 2048))}
+            if operation == 'endpoint-update':
+                from .server_endpoint import project_client_endpoint, read_root_settings, replace_endpoint, revision
+                expected, endpoint = endpoint_request
+                _old_endpoint, _dns, _address, old_port, _obf = self.settings()
+                for record in controller.list_clients():
+                    project_client_endpoint(_read_root_file(self.config_path(record['id']), 2400).decode('ascii'),
+                                            _old_endpoint, old_port)
+                replace_endpoint(self.profile, profile=self.name, expected_revision=expected,
+                                 endpoint=endpoint, limit=2048,
+                                 verify=lambda: (self.settings(), self.controller().list_clients()))
+                endpoint, _dns, address, port, _obf = self.settings()
+                return {'schema_version': 1, 'profile': self.name, 'interface': self.interface,
+                        'endpoint': endpoint, 'address': address, 'listenPort': port,
+                        'state': 'ACTIVE', 'clientCount': len(self.controller().list_clients()),
+                        'revision': revision(read_root_settings(self.profile, 2048))}
             if operation == 'create':
                 return controller.create(request['name'], request['tags'], request['idempotencyKey'],
                                          lambda: (private := self.key(('genkey',)), self.key(('pubkey',), private)),
@@ -288,7 +313,7 @@ class ProfileOps:
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     if (os.geteuid() != 0 or len(args) not in (2, 3) or args[0] not in _INTERFACES or
-        not ((len(args) == 2 and args[1] in {'list', 'server', 'create'}) or
+        not ((len(args) == 2 and args[1] in {'list', 'server', 'create', 'endpoint-update'}) or
              (len(args) == 3 and args[1] in {'config', 'config-update', 'enable', 'disable', 'delete'} and _ID.fullmatch(args[2])))):
         print('invalid profile operation', file=sys.stderr)
         return 64

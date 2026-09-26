@@ -303,6 +303,9 @@ def _load_client_config(client_id: str, controller: CanaryPeerController) -> dic
     if ('peer-' + hashlib.sha256(base64.b64decode(public)).hexdigest()[:16] != client_id or
             fields.get('PublicKey') != _server_public()):
         raise ValueError('stored client configuration mismatch')
+    from .server_endpoint import project_client_endpoint
+    _key, _route, endpoint, _dns, _obf, _address, port = _protected_peer_profile()
+    config_text = project_client_endpoint(config_text, endpoint, port)
     import segno
     qr_uri = segno.make_qr(config_text).png_data_uri(scale=4)
     return {'schema_version': 1, 'client': client, 'configText': config_text,
@@ -317,8 +320,21 @@ def _update_client_config(client_id: str, controller: CanaryPeerController,
         raise ValueError('saved configuration changed')
     replacement = replace_editable(current['configText'], settings)
     if replacement != current['configText']:
-        atomic_replace(_config_path(client_id), current['configText'], replacement)
+        raw = _read_root_client_config(_config_path(client_id))
+        atomic_replace(_config_path(client_id), raw, replacement)
     return _load_client_config(client_id, controller)
+
+
+def _read_root_client_config(path: Path) -> str:
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        _root_regular(fd)
+        raw = os.read(fd, 2401)
+    finally:
+        os.close(fd)
+    if not 1 <= len(raw) <= 2400:
+        raise ValueError('invalid stored client configuration')
+    return raw.decode('ascii')
 
 
 def _read_create_request() -> dict[str, object]:
@@ -351,7 +367,7 @@ def _read_create_request() -> dict[str, object]:
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    if os.geteuid() != 0 or not ((len(args) == 1 and args[0] in {'list', 'server'}) or
+    if os.geteuid() != 0 or not ((len(args) == 1 and args[0] in {'list', 'server', 'endpoint-update'}) or
                                   (len(args) == 2 and args[0] in {'disable', 'enable', 'delete', 'config', 'config-update'} and _ID.fullmatch(args[1])) or
                                   (len(args) == 1 and args[0] == 'create')):
         print('invalid canary operation', file=sys.stderr)
@@ -362,18 +378,41 @@ def main(argv: list[str] | None = None) -> int:
         if args[0] == 'config-update':
             from .client_config_edit import read_update_request
             update_request = read_update_request()
+        endpoint_request = None
+        if args[0] == 'endpoint-update':
+            from .server_endpoint import read_request
+            endpoint_request = read_request()
         with _locked():
             controller = _controller()
             if args[0] == 'list':
                 result = {'schema_version': 1, 'clients': controller.list_clients()}
             elif args[0] == 'server':
+                from .server_endpoint import read_root_settings, revision
                 _key, _route, endpoint, _dns, _obf, address, port = _protected_peer_profile()
                 runtime = _read_dump().splitlines()[0].split('\t')
                 if len(runtime) < 3 or runtime[2] != str(port):
                     raise ValueError('canary runtime drift')
                 result = {'schema_version': 1, 'profile': 'awg3', 'interface': 'awg-canary0',
                           'endpoint': endpoint, 'address': address, 'listenPort': port,
-                          'state': 'ACTIVE', 'clientCount': len(controller.list_clients())}
+                          'state': 'ACTIVE', 'clientCount': len(controller.list_clients()),
+                          'revision': revision(read_root_settings(PROTECTED_PROFILE_FILE, 512))}
+            elif args[0] == 'endpoint-update':
+                from .server_endpoint import project_client_endpoint, replace_endpoint
+                expected, endpoint = endpoint_request
+                _key, _route, current_endpoint, _dns, _obf, _address, current_port = _protected_peer_profile()
+                records = controller.list_clients()
+                for record in records:
+                    project_client_endpoint(_read_root_client_config(_config_path(record['id'])),
+                                            current_endpoint, current_port)
+                replace_endpoint(PROTECTED_PROFILE_FILE, profile='awg3', expected_revision=expected,
+                                 endpoint=endpoint, limit=512,
+                                 verify=lambda: (_protected_peer_profile(), _controller().list_clients()))
+                _key, _route, endpoint, _dns, _obf, address, port = _protected_peer_profile()
+                from .server_endpoint import read_root_settings, revision
+                result = {'schema_version': 1, 'profile': 'awg3', 'interface': 'awg-canary0',
+                          'endpoint': endpoint, 'address': address, 'listenPort': port,
+                          'state': 'ACTIVE', 'clientCount': len(_controller().list_clients()),
+                          'revision': revision(read_root_settings(PROTECTED_PROFILE_FILE, 512))}
             elif args[0] == 'create':
                 result = controller.create(request['name'], request['tags'], request['idempotencyKey'],
                                            _keypair, _server_public, _store_client_config,

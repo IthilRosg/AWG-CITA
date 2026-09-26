@@ -253,6 +253,32 @@ class LifecycleService:
         except Exception:
             raise LifecycleError('awg_command_failed') from None
 
+    def update_server_endpoint(self, expected_revision: str, endpoint: str, idempotency_key: str) -> dict[str, Any]:
+        from .server_endpoint import validate_request
+        try:
+            validate_request({'expectedRevision': expected_revision, 'endpoint': endpoint})
+        except ValueError:
+            raise LifecycleError('invalid_request') from None
+        if not isinstance(idempotency_key, str) or not _IDEMPOTENCY_RE.fullmatch(idempotency_key):
+            raise LifecycleError('invalid_request')
+        if not self._mutation_lock.acquire(timeout=2.0):
+            raise LifecycleError('conflict')
+        try:
+            before = self.adapter.server_settings()
+            if before['revision'] != expected_revision:
+                raise LifecycleError('conflict')
+            if before['endpoint'] == endpoint:
+                return before
+            try:
+                result = self.adapter.update_server_endpoint(expected_revision, endpoint)
+            except Exception:
+                raise LifecycleError('awg_command_failed') from None
+            if result['endpoint'] != endpoint or result['revision'] == expected_revision:
+                raise LifecycleError('awg_command_failed')
+            return result
+        finally:
+            self._mutation_lock.release()
+
     def create_client(self, name: str, tags: list[str], idempotency_key: str, acknowledged: object) -> dict[str, Any]:
         """Provisioning response: never cache the secret in this service or audit its content."""
         if acknowledged is not True:

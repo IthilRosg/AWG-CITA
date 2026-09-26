@@ -145,7 +145,7 @@ class Handler(BaseHTTPRequestHandler):
   if actor is None:self.send_error(401);return
   if (self.path!="/api/clients" and
       not re.fullmatch(r"/api/clients/peer-[0-9a-f]{16}/(?:disable|enable|delete|config)",self.path) and
-      not re.fullmatch(r"/api/profiles/(?:awg3|awg2|wg)/(?:clients(?:/peer-[0-9a-f]{16}/(?:disable|enable|delete|config))?|template)",self.path)):
+      not re.fullmatch(r"/api/profiles/(?:awg3|awg2|wg)/(?:clients(?:/peer-[0-9a-f]{16}/(?:disable|enable|delete|config))?|template|server)",self.path)):
    self.send_error(404);return
   if self.headers.get_all("Origin")!=[ORIGIN]:self.send_error(403);return
   csrf=self.headers.get_all("X-CSRF-Token")
