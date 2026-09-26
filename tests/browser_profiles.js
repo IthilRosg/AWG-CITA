@@ -49,6 +49,22 @@ async function main() {
     });
     const endpoints = { awg3: '127.0.0.1', awg2: '127.0.0.1', wg: '127.0.0.1' };
     const ports = { awg3: 47193, awg2: 47193, wg: 47193 };
+    const addresses = { awg3: '127.31.0.1/24', awg2: '127.32.0.1/24', wg: '127.33.0.1/24' };
+    const obfuscation = { S1: '20', S2: '24', S3: '0', S4: '0', H1: '101', H2: '102', H3: '103', H4: '104' };
+    await page.route('**/api/profiles/*/server/network', async (route) => {
+      const profile = route.request().url().split('/').at(-3);
+      const payload = route.request().postDataJSON();
+      if (profile === 'wg' && payload.address === '127.43.0.1/24' && payload.expectedRevision === 'b'.repeat(64))
+        addresses.wg = payload.address;
+      else if (profile === 'awg2' && payload.obfuscation?.H1 === '201' && payload.expectedRevision === 'b'.repeat(64))
+        Object.assign(obfuscation, payload.obfuscation);
+      else throw new Error('invalid network request');
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        schema_version: 1, profile, interface: profile === 'wg' ? 'awg-cita-wg' : 'awg-cita2', endpoint: endpoints[profile],
+        address: addresses[profile], listenPort: ports[profile], state: 'ACTIVE', clientCount: 2,
+        revision: 'b'.repeat(64), ...(profile === 'awg2' ? { obfuscation } : {})
+      }) });
+    });
     await page.route('**/api/profiles/*/server/port', async (route) => {
       const profile = route.request().url().split('/').at(-3);
       const payload = route.request().postDataJSON();
@@ -56,7 +72,7 @@ async function main() {
       ports.awg2 = payload.listenPort;
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
         schema_version: 1, profile, interface: 'awg-cita2', endpoint: endpoints[profile],
-        address: '127.0.0.2/24', listenPort: ports[profile], state: 'ACTIVE', clientCount: 2,
+        address: addresses[profile], listenPort: ports[profile], state: 'ACTIVE', clientCount: 2,
         revision: 'b'.repeat(64)
       }) });
     });
@@ -70,8 +86,9 @@ async function main() {
       }
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
         schema_version: 1, profile, interface: interfaces[profile], endpoint: endpoints[profile],
-        address: '127.0.0.2/24', listenPort: ports[profile], state: 'ACTIVE', clientCount: 2,
-        revision: endpoints[profile] === '127.0.0.1' && ports[profile] === 47193 ? 'a'.repeat(64) : 'b'.repeat(64)
+        address: addresses[profile], listenPort: ports[profile], state: 'ACTIVE', clientCount: 2,
+        revision: endpoints[profile] === '127.0.0.1' && ports[profile] === 47193 && addresses[profile] === `127.${profile === 'awg3' ? 31 : profile === 'awg2' ? 32 : 33}.0.1/24` ? 'a'.repeat(64) : 'b'.repeat(64),
+        ...(profile === 'awg2' ? { obfuscation } : {})
       }) });
     });
     await page.goto(`${url}#clients`);
@@ -99,6 +116,16 @@ async function main() {
     await portForm.locator('[name="listenPort"]').fill('48193');
     await portForm.locator('button').click();
     await page.waitForFunction(() => document.querySelector('[data-server-profile="awg2"] .server-settings-content')?.textContent.includes('48193'));
+    await page.locator('[data-server-profile="wg"] .server-network-details summary').click();
+    const addressForm = page.locator('[data-address-profile="wg"]');
+    await addressForm.locator('[name="address"]').fill('127.43.0.1/24');
+    await addressForm.locator('button').click();
+    await page.waitForFunction(() => document.querySelector('[data-server-profile="wg"] .server-settings-content')?.textContent.includes('127.43.0.1/24'));
+    await page.locator('[data-server-profile="awg2"] .server-network-details summary').click();
+    const obfuscationForm = page.locator('[data-obfuscation-profile="awg2"]');
+    await obfuscationForm.locator('[name="H1"]').fill('201');
+    await obfuscationForm.locator('button').click();
+    await page.waitForFunction(() => document.querySelector('[data-obfuscation-profile="awg2"] [name="H1"]')?.value === '201');
     const form = page.locator('[data-template-profile="wg"]');
     await page.waitForFunction(() => document.querySelector('[data-template-profile="wg"]')?.dataset.loaded === 'true');
     await form.locator('[name="allowed_ips"]').fill('127.0.0.0/8');

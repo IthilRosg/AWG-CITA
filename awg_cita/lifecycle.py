@@ -305,6 +305,36 @@ class LifecycleService:
         finally:
             self._mutation_lock.release()
 
+    def update_server_network(self, expected_revision: str, kind: str, target: object,
+                              idempotency_key: str) -> dict[str, Any]:
+        from .server_network import validate_request
+        profile = getattr(self.adapter, '_profile', None)
+        try:
+            validate_request({'expectedRevision': expected_revision, kind: target}, profile)
+        except (ValueError, TypeError):
+            raise LifecycleError('invalid_request') from None
+        if not isinstance(idempotency_key, str) or not _IDEMPOTENCY_RE.fullmatch(idempotency_key):
+            raise LifecycleError('invalid_request')
+        if not self._mutation_lock.acquire(timeout=2.0):
+            raise LifecycleError('conflict')
+        try:
+            before = self.adapter.server_settings()
+            if before['revision'] != expected_revision:
+                raise LifecycleError('conflict')
+            current = before['address'] if kind == 'address' else before.get('obfuscation')
+            if current == target:
+                return before
+            try:
+                result = self.adapter.update_server_network(expected_revision, kind, target)
+            except Exception:
+                raise LifecycleError('awg_command_failed') from None
+            actual = result['address'] if kind == 'address' else result.get('obfuscation')
+            if actual != target or result['revision'] == expected_revision:
+                raise LifecycleError('awg_command_failed')
+            return result
+        finally:
+            self._mutation_lock.release()
+
     def create_client(self, name: str, tags: list[str], idempotency_key: str, acknowledged: object) -> dict[str, Any]:
         """Provisioning response: never cache the secret in this service or audit its content."""
         if acknowledged is not True:
