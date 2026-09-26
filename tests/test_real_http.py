@@ -195,6 +195,33 @@ class CanaryHttpTests(unittest.TestCase):
         self.assertEqual(json.loads(body)['endpoint'], 'new.example.org')
         self.assertEqual(self.request('POST', path, payload, trusted)[0], 409)
 
+    def test_server_port_update_requires_csrf_and_revision(self):
+        path = '/api/profiles/awg3/server/port'
+        _, headers, html = self.request('GET', '/')
+        csrf = re.search(r'<meta name="csrf-token" content="([^"]+)">', html).group(1)
+        cookie = headers['Set-Cookie'].split(';', 1)[0]
+        state = {'port': 47192, 'revision': 'a' * 64}
+        adapter = self.server.RequestHandlerClass.lifecycle_service.adapter
+        adapter.server_settings = lambda: {
+            'schema_version': 1, 'profile': 'awg3', 'interface': 'awg-canary0',
+            'endpoint': 'old.example.org', 'address': '127.0.0.2/24', 'listenPort': state['port'],
+            'state': 'ACTIVE', 'clientCount': 1, 'revision': state['revision']}
+        def update(expected, port):
+            self.assertEqual(expected, 'a' * 64)
+            state.update(port=port, revision='b' * 64)
+            return adapter.server_settings()
+        adapter.update_server_port = update
+        payload = json.dumps({'expectedRevision': 'a' * 64, 'listenPort': 48192,
+                              'idempotencyKey': 'port-test-0001'})
+        basic = {'Cookie': cookie, 'Content-Type': 'application/json'}
+        self.assertEqual(self.request('POST', path, payload, basic)[0], 403)
+        trusted = {**basic, 'Origin': self.origin, 'X-CSRF-Token': csrf}
+        status, fields, body = self.request('POST', path, payload, trusted)
+        self.assertEqual(status, 200)
+        self.assertEqual(fields['Cache-Control'], 'no-store')
+        self.assertEqual(json.loads(body)['listenPort'], 48192)
+        self.assertEqual(self.request('POST', path, payload, trusted)[0], 409)
+
     def test_template_update_requires_csrf_and_is_profile_scoped(self):
         _, headers, html = self.request('GET', '/')
         csrf = re.search(r'<meta name="csrf-token" content="([^"]+)">', html).group(1)

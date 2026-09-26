@@ -337,6 +337,18 @@ def _read_root_client_config(path: Path) -> str:
     return raw.decode('ascii')
 
 
+def _recover_port_migration() -> None:
+    from .server_port import recover_pending
+    def verify_runtime(port):
+        runtime = _read_dump().splitlines()[0].split('\t')
+        if len(runtime) < 3 or runtime[2] != str(port):
+            raise ValueError('canary runtime port drift')
+        _controller().list_clients()
+    recover_pending(profile='awg3', path=PROTECTED_PROFILE_FILE, limit=512,
+                    read_config=_read_config, write_config=_write_config,
+                    sync_runtime=_sync_runtime, verify_runtime=verify_runtime)
+
+
 def _read_create_request() -> dict[str, object]:
     import select
     fd = sys.stdin.fileno()
@@ -367,7 +379,7 @@ def _read_create_request() -> dict[str, object]:
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    if os.geteuid() != 0 or not ((len(args) == 1 and args[0] in {'list', 'server', 'endpoint-update'}) or
+    if os.geteuid() != 0 or not ((len(args) == 1 and args[0] in {'list', 'server', 'endpoint-update', 'port-update'}) or
                                   (len(args) == 2 and args[0] in {'disable', 'enable', 'delete', 'config', 'config-update'} and _ID.fullmatch(args[1])) or
                                   (len(args) == 1 and args[0] == 'create')):
         print('invalid canary operation', file=sys.stderr)
@@ -382,7 +394,12 @@ def main(argv: list[str] | None = None) -> int:
         if args[0] == 'endpoint-update':
             from .server_endpoint import read_request
             endpoint_request = read_request()
+        port_request = None
+        if args[0] == 'port-update':
+            from .server_port import read_request
+            port_request = read_request()
         with _locked():
+            _recover_port_migration()
             controller = _controller()
             if args[0] == 'list':
                 result = {'schema_version': 1, 'clients': controller.list_clients()}
@@ -410,6 +427,31 @@ def main(argv: list[str] | None = None) -> int:
                                  verify=lambda: (_protected_peer_profile(), _controller().list_clients()))
                 _key, _route, endpoint, _dns, _obf, address, port = _protected_peer_profile()
                 from .server_endpoint import read_root_settings, revision
+                result = {'schema_version': 1, 'profile': 'awg3', 'interface': 'awg-canary0',
+                          'endpoint': endpoint, 'address': address, 'listenPort': port,
+                          'state': 'ACTIVE', 'clientCount': len(_controller().list_clients()),
+                          'revision': revision(read_root_settings(PROTECTED_PROFILE_FILE, 512))}
+            elif args[0] == 'port-update':
+                from .server_endpoint import project_client_endpoint, read_root_settings, revision
+                from .server_port import apply_port
+                expected, new_port = port_request
+                _key, _route, old_endpoint, _dns, _obf, _address, old_port = _protected_peer_profile()
+                for record in controller.list_clients():
+                    path = _config_path(record['id'])
+                    if path.exists() or path.is_symlink():
+                        project_client_endpoint(_read_root_client_config(path), old_endpoint, old_port)
+                def verify_runtime(port):
+                    runtime = _read_dump().splitlines()[0].split('\t')
+                    if len(runtime) < 3 or runtime[2] != str(port):
+                        raise ValueError('canary runtime port drift')
+                    _controller().list_clients()
+                apply_port(profile='awg3', path=PROTECTED_PROFILE_FILE, limit=512,
+                           config=_read_protected_config(), write_config=_write_config,
+                           read_config=_read_config, settings_port=old_port,
+                           expected_revision=expected, new_port=new_port,
+                           verify_settings=_protected_peer_profile, sync_runtime=_sync_runtime,
+                           verify_runtime=verify_runtime)
+                _key, _route, endpoint, _dns, _obf, address, port = _protected_peer_profile()
                 result = {'schema_version': 1, 'profile': 'awg3', 'interface': 'awg-canary0',
                           'endpoint': endpoint, 'address': address, 'listenPort': port,
                           'state': 'ACTIVE', 'clientCount': len(_controller().list_clients()),

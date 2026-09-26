@@ -818,6 +818,9 @@
     async updateServerEndpoint(profile, expectedRevision, endpoint) {
       return this.request(`/api/profiles/${profile}/server`, { expectedRevision, endpoint, idempotencyKey: crypto.randomUUID() });
     }
+    async updateServerPort(profile, expectedRevision, listenPort) {
+      return this.request(`/api/profiles/${profile}/server/port`, { expectedRevision, listenPort, idempotencyKey: crypto.randomUUID() });
+    }
     async updateTemplate(profile, template) { return this.request(`/api/profiles/${profile}/template`, { ...template, idempotencyKey: crypto.randomUUID() }); }
   }
 
@@ -2277,13 +2280,15 @@
   async function loadServerSettings() {
     const ru = state.locale === 'ru';
     $('server-settings-title').textContent = ru ? 'Интерфейсы сервера' : 'Server interfaces';
-    $('server-settings-note').textContent = ru ? 'Endpoint применяется к новым выдачам конфигов без перезапуска VPN. Уже импортированные файлы нужно скачать заново. Порт, адрес и обфускация пока доступны только для просмотра.' : 'The endpoint applies to newly downloaded configs without restarting the VPN. Download and import existing client configs again. Ports, addresses and obfuscation are read only for now.';
+    $('server-settings-note').textContent = ru ? 'Endpoint меняется без перезапуска. Перенос UDP порта перезапускает выбранный интерфейс и отключит старые клиентские файлы: после переноса скачайте конфиги заново. Старое правило firewall остаётся для отката. Адрес интерфейса и обфускация пока доступны только для просмотра.' : 'The endpoint changes without a restart. Moving a UDP port restarts the selected interface and disconnects old client files: download configs again afterward. The old firewall rule remains for rollback. Interface address and obfuscation are read only.';
     $('client-defaults-title').textContent = ru ? 'Шаблоны конфигов' : 'Client config templates';
     for (const profile of ['awg3', 'awg2', 'wg']) {
       const content = document.querySelector(`[data-server-profile="${profile}"] .server-settings-content`);
       const form = document.querySelector(`[data-endpoint-profile="${profile}"]`);
+      const portForm = document.querySelector(`[data-port-profile="${profile}"]`);
       form.querySelector('button').textContent = ru ? 'Сохранить endpoint' : 'Save endpoint';
-      if (!realCanary) { content.textContent = ru ? 'Доступно только на сервере' : 'Available on server only'; form.hidden = true; continue; }
+      portForm.querySelector('button').textContent = ru ? 'Перенести порт' : 'Move port';
+      if (!realCanary) { content.textContent = ru ? 'Доступно только на сервере' : 'Available on server only'; form.hidden = true; portForm.hidden = true; continue; }
       try {
         const value = await adapter.getServerSettings(profile);
         if (value?.schema_version !== 1 || value.profile !== profile || value.state !== 'ACTIVE' || !/^[0-9a-f]{64}$/.test(value.revision)) throw new Error('invalid_server_settings');
@@ -2291,6 +2296,11 @@
         form.dataset.revision = value.revision;
         form.elements.namedItem('endpoint').value = value.endpoint;
         form.querySelector('button').disabled = false;
+        portForm.hidden = false;
+        portForm.dataset.revision = value.revision;
+        portForm.dataset.currentPort = String(value.listenPort);
+        portForm.elements.namedItem('listenPort').value = String(value.listenPort);
+        portForm.querySelector('button').disabled = false;
         content.replaceChildren();
         const rows = [
           [ru ? 'Состояние' : 'State', ru ? 'Работает' : 'Active'],
@@ -2305,7 +2315,7 @@
           const item = document.createElement('b'); item.textContent = data;
           row.append(caption, item); content.append(row);
         }
-      } catch (_error) { content.textContent = ru ? 'Не удалось получить состояние' : 'Status unavailable'; form.querySelector('button').disabled = true; }
+      } catch (_error) { content.textContent = ru ? 'Не удалось получить состояние' : 'Status unavailable'; form.querySelector('button').disabled = true; portForm.querySelector('button').disabled = true; }
     }
   }
 
@@ -2324,6 +2334,27 @@
       await loadServerSettings();
     } catch (_error) {
       status.textContent = state.locale === 'ru' ? 'Не удалось применить. Состояние обновлено.' : 'Apply failed. Status refreshed.';
+      await loadServerSettings();
+    } finally { button.disabled = false; }
+  }
+
+  async function saveServerPort(form) {
+    const profile = form.dataset.portProfile;
+    const listenPort = Number(form.elements.namedItem('listenPort').value);
+    const button = form.querySelector('button');
+    const status = document.querySelector(`[data-port-status="${profile}"]`);
+    if (!realCanary || !/^[0-9a-f]{64}$/.test(form.dataset.revision || '') ||
+        !Number.isInteger(listenPort) || listenPort < 1 || listenPort > 65535) return;
+    if (listenPort === Number(form.dataset.currentPort)) return;
+    button.disabled = true;
+    status.textContent = state.locale === 'ru' ? 'Переношу порт…' : 'Moving port…';
+    try {
+      const value = await adapter.updateServerPort(profile, form.dataset.revision, listenPort);
+      if (value?.schema_version !== 1 || value.profile !== profile || value.listenPort !== listenPort) throw new Error('invalid_server_settings');
+      status.textContent = state.locale === 'ru' ? 'Порт перенесён. Скачайте конфиги клиентов заново.' : 'Port moved. Download client configs again.';
+      await loadServerSettings();
+    } catch (_error) {
+      status.textContent = state.locale === 'ru' ? 'Перенос не выполнен. Проверьте состояние.' : 'Move failed. Check server status.';
       await loadServerSettings();
     } finally { button.disabled = false; }
   }
@@ -2635,6 +2666,8 @@
   });
 
   document.addEventListener('submit', (event) => {
+    const portForm = event.target.closest('[data-port-profile]');
+    if (portForm) { event.preventDefault(); saveServerPort(portForm); return; }
     const endpointForm = event.target.closest('[data-endpoint-profile]');
     if (endpointForm) { event.preventDefault(); saveServerEndpoint(endpointForm); return; }
     if (event.target.id === 'config-edit-form') {

@@ -48,6 +48,18 @@ async function main() {
         body: JSON.stringify({ schema_version: 1, profile, template }) });
     });
     const endpoints = { awg3: '127.0.0.1', awg2: '127.0.0.1', wg: '127.0.0.1' };
+    const ports = { awg3: 47193, awg2: 47193, wg: 47193 };
+    await page.route('**/api/profiles/*/server/port', async (route) => {
+      const profile = route.request().url().split('/').at(-3);
+      const payload = route.request().postDataJSON();
+      if (profile !== 'awg2' || payload.listenPort !== 48193 || payload.expectedRevision !== 'a'.repeat(64) || !payload.idempotencyKey) throw new Error('invalid port request');
+      ports.awg2 = payload.listenPort;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        schema_version: 1, profile, interface: 'awg-cita2', endpoint: endpoints[profile],
+        address: '127.0.0.2/24', listenPort: ports[profile], state: 'ACTIVE', clientCount: 2,
+        revision: 'b'.repeat(64)
+      }) });
+    });
     await page.route('**/api/profiles/*/server', async (route) => {
       const profile = route.request().url().split('/').at(-2);
       const interfaces = { awg3: 'awg-canary0', awg2: 'awg-cita2', wg: 'awg-cita-wg' };
@@ -58,8 +70,8 @@ async function main() {
       }
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
         schema_version: 1, profile, interface: interfaces[profile], endpoint: endpoints[profile],
-        address: '127.0.0.2/24', listenPort: 47193, state: 'ACTIVE', clientCount: 2,
-        revision: endpoints[profile] === '127.0.0.1' ? 'a'.repeat(64) : 'b'.repeat(64)
+        address: '127.0.0.2/24', listenPort: ports[profile], state: 'ACTIVE', clientCount: 2,
+        revision: endpoints[profile] === '127.0.0.1' && ports[profile] === 47193 ? 'a'.repeat(64) : 'b'.repeat(64)
       }) });
     });
     await page.goto(`${url}#clients`);
@@ -83,6 +95,10 @@ async function main() {
     await endpointForm.locator('[name="endpoint"]').fill('vpn.example.org');
     await endpointForm.locator('button').click();
     await page.waitForFunction(() => document.querySelector('[data-server-profile="wg"] .server-settings-content')?.textContent.includes('vpn.example.org'));
+    const portForm = page.locator('[data-port-profile="awg2"]');
+    await portForm.locator('[name="listenPort"]').fill('48193');
+    await portForm.locator('button').click();
+    await page.waitForFunction(() => document.querySelector('[data-server-profile="awg2"] .server-settings-content')?.textContent.includes('48193'));
     const form = page.locator('[data-template-profile="wg"]');
     await page.waitForFunction(() => document.querySelector('[data-template-profile="wg"]')?.dataset.loaded === 'true');
     await form.locator('[name="allowed_ips"]').fill('127.0.0.0/8');

@@ -265,7 +265,12 @@ class ProfileOps:
         if operation == 'endpoint-update':
             from .server_endpoint import read_request
             endpoint_request = read_request()
+        port_request = None
+        if operation == 'port-update':
+            from .server_port import read_request
+            port_request = read_request()
         with self.locked():
+            self.recover_port_migration()
             controller = self.controller()
             if operation == 'list':
                 return {'schema_version': 1, 'clients': controller.list_clients()}
@@ -296,6 +301,32 @@ class ProfileOps:
                         'endpoint': endpoint, 'address': address, 'listenPort': port,
                         'state': 'ACTIVE', 'clientCount': len(self.controller().list_clients()),
                         'revision': revision(read_root_settings(self.profile, 2048))}
+            if operation == 'port-update':
+                from .server_endpoint import project_client_endpoint, read_root_settings, revision
+                from .server_port import apply_port
+                expected, new_port = port_request
+                old_endpoint, _dns, _address, old_port, _obf = self.settings()
+                for record in controller.list_clients():
+                    path = self.config_path(record['id'])
+                    if path.exists() or path.is_symlink():
+                        project_client_endpoint(_read_root_file(path, 2400).decode('ascii'),
+                                                old_endpoint, old_port)
+                def verify_runtime(port):
+                    runtime = self.read_dump().splitlines()[0].split('\t')
+                    if len(runtime) < 3 or runtime[2] != str(port):
+                        raise ValueError('profile runtime port drift')
+                    self.controller().list_clients()
+                apply_port(profile=self.name, path=self.profile, limit=2048,
+                           config=self.read_config(), write_config=self.write_config,
+                           read_config=self.read_config, settings_port=old_port,
+                           expected_revision=expected, new_port=new_port,
+                           verify_settings=self.settings, sync_runtime=self.sync_runtime,
+                           verify_runtime=verify_runtime)
+                endpoint, _dns, address, port, _obf = self.settings()
+                return {'schema_version': 1, 'profile': self.name, 'interface': self.interface,
+                        'endpoint': endpoint, 'address': address, 'listenPort': port,
+                        'state': 'ACTIVE', 'clientCount': len(self.controller().list_clients()),
+                        'revision': revision(read_root_settings(self.profile, 2048))}
             if operation == 'create':
                 return controller.create(request['name'], request['tags'], request['idempotencyKey'],
                                          lambda: (private := self.key(('genkey',)), self.key(('pubkey',), private)),
@@ -311,11 +342,22 @@ class ProfileOps:
                 return {'schema_version': 1, 'id': args[1], 'deleted': True}
             return {'schema_version': 1, 'client': value}
 
+    def recover_port_migration(self) -> None:
+        from .server_port import recover_pending
+        def verify_runtime(port):
+            runtime = self.read_dump().splitlines()[0].split('\t')
+            if len(runtime) < 3 or runtime[2] != str(port):
+                raise ValueError('profile runtime port drift')
+            self.controller().list_clients()
+        recover_pending(profile=self.name, path=self.profile, limit=2048,
+                        read_config=self.read_config, write_config=self.write_config,
+                        sync_runtime=self.sync_runtime, verify_runtime=verify_runtime)
+
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     if (os.geteuid() != 0 or len(args) not in (2, 3) or args[0] not in _INTERFACES or
-        not ((len(args) == 2 and args[1] in {'list', 'server', 'create', 'endpoint-update'}) or
+        not ((len(args) == 2 and args[1] in {'list', 'server', 'create', 'endpoint-update', 'port-update'}) or
              (len(args) == 3 and args[1] in {'config', 'config-update', 'enable', 'disable', 'delete'} and _ID.fullmatch(args[2])))):
         print('invalid profile operation', file=sys.stderr)
         return 64
