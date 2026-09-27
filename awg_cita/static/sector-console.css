@@ -191,6 +191,9 @@ dt,
   font-size: 10px;
   letter-spacing: .08em;
 }
+.topbar-actions { display: flex; align-items: center; gap: 16px; }
+.logout-button { padding: 6px 0 6px 13px; border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--dim); font: 11px var(--mono); }
+.logout-button:hover, .logout-button:focus-visible { color: var(--text); }
 
 .connection-loading { color: var(--warn); }
 .connection-error { color: var(--red); }

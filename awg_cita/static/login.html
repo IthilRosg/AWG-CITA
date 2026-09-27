@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0c0c0e">
+  <title>Вход · AWG CITA</title>
+  <link rel="stylesheet" href="/auth/login.css">
+  <script src="/auth/login.js" defer></script>
+</head>
+<body>
+  <main class="login-shell">
+    <section class="identity-panel" aria-label="AWG CITA">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">◇</span><span>AWG CITA</span></div>
+      <div class="identity-body">
+        <p class="eyebrow">OPERATOR CONSOLE / NODE 01</p>
+        <div class="identity-glyph" aria-hidden="true"><span></span><span></span><span></span></div>
+        <h1>Управление<br><em>под контролем.</em></h1>
+        <p class="identity-copy">Клиенты, конфигурации и состояние интерфейсов в одной защищённой панели.</p>
+      </div>
+      <div class="identity-footer"><span class="signal-dot" aria-hidden="true"></span> ЗАЩИЩЁННЫЙ ДОСТУП <span class="footer-index">01 / 01</span></div>
+    </section>
+
+    <section class="form-panel" aria-labelledby="login-title">
+      <div class="form-topline"><span>AWG CITA</span><span>AUTH / 01</span></div>
+      <div class="form-content">
+        <div class="form-kicker"><span class="kicker-line"></span> ОПЕРАТОРСКИЙ ДОСТУП</div>
+        <h2 id="login-title">Вход в панель</h2>
+        <p class="form-intro">Используйте учётные данные оператора, чтобы продолжить работу.</p>
+        <form id="login-form" autocomplete="on">
+          <label for="username">Логин</label>
+          <input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="64" required autofocus>
+
+          <div class="password-label"><label for="password">Пароль</label><button id="password-toggle" type="button" aria-label="Показать пароль" aria-pressed="false">Показать</button></div>
+          <input id="password" name="password" type="password" autocomplete="current-password" maxlength="256" required>
+
+          <p id="login-error" class="login-error" role="alert" hidden></p>
+          <button id="login-submit" class="login-submit" type="submit"><span>Войти</span><span aria-hidden="true">↗</span></button>
+        </form>
+        <p class="form-footnote"><span class="lock-icon" aria-hidden="true">▣</span> Доступ к панели выдаётся только на этом устройстве и действует ограниченное время.</p>
+      </div>
+      <div class="form-bottomline"><span>AWG CITA / ОПЕРАТОРСКАЯ КОНСОЛЬ</span><span>RU</span></div>
+    </section>
+  </main>
+</body>
+</html>

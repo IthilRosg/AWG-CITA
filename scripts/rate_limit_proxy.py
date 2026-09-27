@@ -11,13 +11,23 @@ import os
 import re
 import socket
 import stat
+import json
+import sys
 import threading,time
+from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parent))
+from operator_auth import OperatorAuth, clear_cookie, read_password_hash, session_cookie
 HOST=os.environ.get("AWG_CITA_OPERATOR_HOST") or "panel.example"
 ORIGIN=os.environ.get("AWG_CITA_OPERATOR_ORIGIN") or "https://panel.example:8444"
 OPERATOR_ID=os.environ.get("AWG_CITA_OPERATOR_ID") or "test-operator"
+AUTH_MODE=os.environ.get("AWG_CITA_AUTH_MODE") or "legacy"
+LOGIN_ROOT=Path(os.environ.get("AWG_CITA_LOGIN_ROOT") or "/opt/awg-cita/current/site/awg_cita/static")
+AUTH=(OperatorAuth(OPERATOR_ID,read_password_hash(Path(os.environ.get("AWG_CITA_AUTH_HASH_FILE") or "/etc/awg-cita/operator-auth.hash")))
+      if AUTH_MODE=="form" else None)
 BACKEND_SOCKET="/run/awg-cita-app/backend.sock"; RELAY_SOCKET="/run/awg-cita-relay/relay.sock"; lock=threading.Lock(); tokens=6.0; last=time.monotonic()
 action_lock=threading.Lock(); action_tokens=6.0; action_last=time.monotonic(); action_slots=threading.BoundedSemaphore(3)
 client_lock=threading.Lock(); client_tokens=6.0; client_last=time.monotonic()
+login_lock=threading.Lock(); login_tokens=5.0; login_last=time.monotonic()
 ACTION_BACKEND_TIMEOUT=330  # Longer than the app's bounded helper operation and rollback.
 CLIENT_READ_TIMEOUT=30  # Longer than the app's bounded list helper and lock wait.
 
@@ -107,12 +117,83 @@ def client_permitted():
   now=time.monotonic();client_tokens=min(6.0,client_tokens+(now-client_last)*0.5);client_last=now
   if client_tokens<1:return False
   client_tokens-=1;return True
+def login_permitted():
+ global login_tokens,login_last
+ with login_lock:
+  now=time.monotonic();login_tokens=min(5.0,login_tokens+(now-login_last)/12);login_last=now
+  if login_tokens<1:return False
+  login_tokens-=1;return True
 class Handler(BaseHTTPRequestHandler):
  protocol_version="HTTP/1.1"
  def log_message(self,*args):pass
  def operator_id(self):
+  if AUTH_MODE=="form":
+   fields=self.headers.get_all("Cookie")
+   return AUTH.actor(fields[0]) if fields is not None and len(fields)==1 else None
   values=self.headers.get_all("X-AWG-Operator")
   return OPERATOR_ID if values==[OPERATOR_ID] else None
+ def auth_reply(self,status,payload,cookie=None):
+  body=json.dumps(payload,separators=(",",":")).encode()
+  self.send_response(status);self.send_header("Content-Type","application/json; charset=utf-8")
+  self.send_header("Content-Length",str(len(body)));self.send_header("Cache-Control","no-store")
+  self.send_header("X-Content-Type-Options","nosniff");self.send_header("X-Frame-Options","DENY")
+  if cookie:self.send_header("Set-Cookie",cookie)
+  self.end_headers();self.wfile.write(body)
+ def login_asset(self,path):
+  names={'/login':('login.html','text/html; charset=utf-8'),
+         '/auth/login.css':('login.css','text/css; charset=utf-8'),
+         '/auth/login.js':('login.js','text/javascript; charset=utf-8')}
+  item=names.get(path)
+  if item is None:return False
+  try:
+   body=(LOGIN_ROOT/item[0]).read_bytes()
+   if not 1<=len(body)<=32768:raise ValueError('invalid login asset')
+  except (OSError,ValueError):
+   self.auth_reply(503,{'error_code':'login_unavailable'});return True
+  self.send_response(200);self.send_header("Content-Type",item[1]);self.send_header("Content-Length",str(len(body)))
+  self.send_header("Cache-Control","no-store");self.send_header("X-Content-Type-Options","nosniff")
+  self.send_header("X-Frame-Options","DENY");self.send_header("Referrer-Policy","no-referrer")
+  self.send_header("Content-Security-Policy","default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+  self.end_headers();self.wfile.write(body);return True
+ def login(self):
+  if self.headers.get_all("Origin")!=[ORIGIN] or self.headers.get("Sec-Fetch-Site","same-origin")!="same-origin":
+   self.auth_reply(403,{'error_code':'forbidden'});return
+  if self.headers.get_all("Content-Type")!=["application/json"] or self.headers.get_all("Transfer-Encoding") is not None:
+   self.auth_reply(415,{'error_code':'invalid_content_type'});return
+  lengths=self.headers.get_all("Content-Length")
+  if lengths is None or len(lengths)!=1 or not lengths[0].isdigit() or not 1<=int(lengths[0])<=512:
+   self.auth_reply(400,{'error_code':'invalid_request'});return
+  if not login_permitted():self.auth_reply(429,{'error_code':'rate_limited'});return
+  self.connection.settimeout(10)
+  body=self.rfile.read(int(lengths[0]))
+  if len(body)!=int(lengths[0]):
+   self.close_connection=True;self.auth_reply(400,{'error_code':'invalid_request'});return
+  try:
+   def unique(pairs):
+    result={}
+    for key,value in pairs:
+     if key in result:raise ValueError('duplicate login field')
+     result[key]=value
+    return result
+   value=json.loads(body,object_pairs_hook=unique)
+   if not isinstance(value,dict) or set(value)!={'username','password'}:raise ValueError('invalid login body')
+  except (ValueError,UnicodeError):
+   self.auth_reply(400,{'error_code':'invalid_request'});return
+  token=AUTH.authenticate(value['username'],value['password'])
+  if token is None:self.auth_reply(401,{'error_code':'invalid_credentials'});return
+  self.auth_reply(200,{'ok':True},session_cookie(token))
+ def logout(self):
+  fields=self.headers.get_all("Cookie")
+  if self.operator_id() is None or fields is None or len(fields)!=1:
+   self.auth_reply(401,{'error_code':'unauthorized'});return
+  if self.headers.get_all("Origin")!=[ORIGIN] or self.headers.get("Sec-Fetch-Site","same-origin")!="same-origin":
+   self.auth_reply(403,{'error_code':'forbidden'});return
+  lengths=self.headers.get_all("Content-Length")
+  if lengths is None or len(lengths)!=1 or lengths[0]!="2" or self.headers.get_all("Content-Type")!=["application/json"]:
+   self.auth_reply(400,{'error_code':'invalid_request'});return
+  self.connection.settimeout(10)
+  if self.rfile.read(2)!=b'{}':self.auth_reply(400,{'error_code':'invalid_request'});return
+  AUTH.revoke(fields[0]);self.auth_reply(200,{'ok':True},clear_cookie())
  def session_cookie(self):
   fields=self.headers.get_all("Cookie")
   if fields is None or len(fields)!=1:return None
@@ -121,6 +202,14 @@ class Handler(BaseHTTPRequestHandler):
   return "awg_cita_session="+values[0]
  def do_GET(self):
   if self.headers.get_all("Host")!=[HOST]:self.send_error(421);return
+  if AUTH_MODE=="form":
+   if self.path=="/login" and self.operator_id() is not None:
+    self.send_response(303);self.send_header("Location","/");self.send_header("Content-Length","0");self.end_headers();return
+   if self.login_asset(self.path):return
+   if self.operator_id() is None:
+    if urlsplit(self.path).path=="/":
+     self.send_response(303);self.send_header("Location","/login");self.send_header("Content-Length","0");self.send_header("Cache-Control","no-store");self.end_headers();return
+    self.auth_reply(401,{'error_code':'unauthorized'});return
   actor=self.operator_id()
   if actor is None:self.send_error(401);return
   path=urlsplit(self.path).path
@@ -147,6 +236,8 @@ class Handler(BaseHTTPRequestHandler):
    if is_client_read:action_slots.release()
  def do_POST(self):
   if self.headers.get_all("Host")!=[HOST]:self.send_error(421);return
+  if AUTH_MODE=="form" and self.path=="/auth/login":self.login();return
+  if AUTH_MODE=="form" and self.path=="/auth/logout":self.logout();return
   actor=self.operator_id()
   if actor is None:self.send_error(401);return
   if not post_path_allowed(self.path):
@@ -183,6 +274,9 @@ class Handler(BaseHTTPRequestHandler):
   finally:action_slots.release()
 if __name__=="__main__":
  if os.name!="posix":raise RuntimeError("Unix sockets require POSIX")
+ if AUTH_MODE not in {"legacy","form"}:raise RuntimeError("invalid auth mode")
+ if AUTH_MODE=="form" and not all((LOGIN_ROOT/name).is_file() for name in ("login.html","login.css","login.js")):
+  raise RuntimeError("login assets unavailable")
  if not os.environ.get("AWG_CITA_OPERATOR_HOST") or not os.environ.get("AWG_CITA_OPERATOR_ORIGIN") or not os.environ.get("AWG_CITA_OPERATOR_ID"):
   raise RuntimeError("operator host, origin, and identity must be configured")
  parsed=urlsplit(ORIGIN)

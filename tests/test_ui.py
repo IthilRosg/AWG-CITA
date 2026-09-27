@@ -116,7 +116,7 @@ class UiTests(unittest.TestCase):
 
         self.assertTrue(script.startswith("(() => {"))
         self.assertTrue(script.rstrip().endswith("})();"))
-        self.assertNotIn("method: 'POST'", script)
+        self.assertIn("fetch('/auth/logout', { method: 'POST'", script)
         self.assertNotIn("method: 'DELETE'", script)
 
     def test_sector_console_script_is_valid_javascript(self):
