@@ -50,7 +50,7 @@ INDEX_HTML = """<!doctype html>
     <main id="app" class="app" aria-busy="true">
       <div class="topbar">
         <span class="eyebrow" data-i18n="perimeter">ЛОКАЛЬНЫЙ КОНТУР</span>
-        <span id="connection-state" class="connection-state" data-state="loading">● LOADING</span>
+        <div class="topbar-actions"><span id="connection-state" class="connection-state" data-state="loading">● LOADING</span><button id="logout-button" class="logout-button" type="button" hidden>Выйти</button></div>
       </div>
 
       <header class="page-header">

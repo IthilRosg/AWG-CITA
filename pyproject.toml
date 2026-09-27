@@ -25,4 +25,4 @@ awg-cita = "awg_cita.cli:main"
 packages = ["awg_cita"]
 
 [tool.setuptools.package-data]
-awg_cita = ["static/*.css", "static/*.js", "static/*.svg"]
+awg_cita = ["static/*.css", "static/*.html", "static/*.js", "static/*.svg"]

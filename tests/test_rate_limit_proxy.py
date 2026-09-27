@@ -214,6 +214,47 @@ class RateLimitRelayTests(unittest.TestCase):
             client.sendall(request)
             return int(client.recv(1024).split(b'\r\n', 1)[0].split()[1])
 
+    def test_form_login_logout_and_forged_identity(self):
+        from operator_auth import OperatorAuth
+
+        globals_ = self.relay.RequestHandlerClass.do_GET.__globals__
+        globals_['AUTH_MODE'] = 'form'
+        globals_['LOGIN_ROOT'] = RELAY.parents[1] / 'awg_cita' / 'static'
+        globals_['AUTH'] = OperatorAuth(
+            'test-operator', b'$2b$12$' + b'A' * 53,
+            verify=lambda password, _hash: password == b'correct-password')
+        globals_['login_tokens'] = 5.0
+
+        self.assertEqual(self.request('GET', '/')[0], 303)
+        self.assertEqual(self.request('GET', '/login')[0], 200)
+        self.assertEqual(self.request('GET', '/auth/login.css')[0], 200)
+        self.assertEqual(self.request('GET', '/auth/login.js')[0], 200)
+        self.assertEqual(self.request('GET', '/api/clients')[0], 401)
+        self.assertEqual(self.request('GET', '/', headers={'Cookie': '__Host-awg_cita_auth=forged'})[0], 303)
+        self.assertEqual(Backend.seen, [])
+
+        origin = {'Origin': 'https://' + HOST + ':8444', 'Content-Type': 'application/json'}
+        wrong = json.dumps({'username': 'test-operator', 'password': 'wrong'}).encode()
+        self.assertEqual(self.request('POST', '/auth/login', wrong, origin)[0], 401)
+        self.assertEqual(self.request('POST', '/auth/login', wrong,
+                                      dict(origin, **{'Origin': 'https://attacker.invalid'}))[0], 403)
+        valid = json.dumps({'username': 'test-operator', 'password': 'correct-password'}).encode()
+        status, headers, _ = self.request('POST', '/auth/login', valid, origin)
+        self.assertEqual(status, 200)
+        self.assertNotIn('WWW-Authenticate', headers)
+        self.assertIn('Secure; HttpOnly; SameSite=Strict; Path=/', headers['Set-Cookie'])
+        auth_cookie = headers['Set-Cookie'].split(';', 1)[0]
+        status, headers, _ = self.request('GET', '/', headers={'Cookie': auth_cookie,
+                                                               'X-AWG-Operator': 'forged'})
+        self.assertEqual(status, 200)
+        self.assertEqual(Backend.seen_operators[-1], ['test-operator'])
+        app_cookie = headers['Set-Cookie'].split(';', 1)[0]
+        self.assertEqual(self.request('GET', '/api/clients', headers={'Cookie': auth_cookie + '; ' + app_cookie})[0], 200)
+        self.assertEqual(Backend.seen[-1][1], app_cookie)
+        self.assertEqual(self.request('POST', '/auth/logout', b'{}',
+                                      dict(origin, **{'Cookie': auth_cookie}))[0], 200)
+        self.assertEqual(self.request('GET', '/', headers={'Cookie': auth_cookie})[0], 303)
+
     def test_public_get_carries_only_application_session_to_backend(self):
         status, headers, _ = self.request('GET', '/')
         self.assertEqual(status, 200)

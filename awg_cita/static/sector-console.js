@@ -829,6 +829,7 @@
 
   const shell = document.querySelector('.shell');
   const realCanary = shell?.dataset.runtime === 'real_canary';
+  if (realCanary) document.querySelector('#logout-button').hidden = false;
   const profileDetails = {
     awg3: { interface: 'awg-canary0', client: 'AmneziaWG 3.1' },
     awg2: { interface: 'awg-cita2', client: 'AmneziaWG 2.0 / WireSock' },
@@ -1516,6 +1517,7 @@
     $('preview-submit').disabled = wizard.submitting;
     if (realCanary) {
       const ru = state.locale === 'ru';
+      $('logout-button').textContent = ru ? 'Выйти' : 'Sign out';
       const profile = currentProfile();
       const labels = ru ? {
         button: 'Создать клиента', title: 'Создание клиента · реальный peer', intro: `Создание peer для ${profile.client} на ${profile.interface}.`,
@@ -2541,6 +2543,13 @@
   }
 
   document.addEventListener('click', (event) => {
+    if (event.target.closest('#logout-button')) {
+      if (realCanary) fetch('/auth/logout', { method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' }, body: '{}' })
+        .then((response) => { if (!response.ok) throw new Error('logout failed'); window.location.replace('/login'); })
+        .catch(() => showToast(state.locale === 'ru' ? 'Не удалось выйти. Повторите попытку.' : 'Sign out failed. Try again.', 'error'));
+      return;
+    }
     const profileButton = event.target.closest('[data-client-profile]');
     if (profileButton) { switchProfile(profileButton.dataset.clientProfile); return; }
     const viewButton = event.target.closest('[data-view]');
