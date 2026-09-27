@@ -542,6 +542,7 @@
   const state = {
     currentView: ['clients', 'journal', 'settings'].includes(window.location.hash.slice(1)) ? window.location.hash.slice(1) : 'overview',
     locale: 'ru',
+    settingsTab: 'configs',
     selectedProfile: 'awg3',
     clients: [],
     statusHistory: [],
@@ -603,7 +604,7 @@
     configPreview: {
       open: false,
       clientId: null,
-      tab: 'qr',
+      tab: 'overview',
       loading: false,
       error: '',
       result: null
@@ -1699,6 +1700,7 @@
       document.querySelector('#config-preview-modal .eyebrow').textContent = ru ? 'КЛИЕНТ / КОНФИГУРАЦИЯ' : 'CLIENT / CONFIGURATION';
       $('config-preview-copy-text').textContent = ru ? 'Приватная конфигурация. Скачивайте и показывайте QR только на доверенном устройстве.' : 'Private configuration. Download and display the QR only on a trusted device.';
       $('config-preview-download').textContent = ru ? 'Скачать .conf' : 'Download .conf';
+      $('config-preview-tab-overview').textContent = ru ? 'Файл' : 'File';
       $('config-preview-tab-edit').textContent = ru ? 'Параметры' : 'Settings';
       $('config-edit-intro').textContent = ru ? 'Сохраняется для повторной выдачи этого клиента. Ключи и параметры сервера не меняются.' : 'Saved for this client’s future downloads. Keys and server parameters stay unchanged.';
       $('config-edit-save').textContent = ru ? 'Сохранить параметры' : 'Save settings';
@@ -1707,11 +1709,19 @@
     modal.hidden = !config.open;
     modal.setAttribute('aria-hidden', String(!config.open));
     const result = config.result;
-    for (const tab of ['qr', 'config', 'edit']) {
+    const ru = state.locale === 'ru';
+    $('config-file-title').textContent = result ? (ru ? 'Файл конфигурации готов' : 'Configuration file is ready') :
+      config.loading ? (ru ? 'Готовим конфигурацию…' : 'Preparing configuration…') : (ru ? 'Конфигурация недоступна' : 'Configuration unavailable');
+    $('config-file-copy').textContent = result ?
+      (realCanary ? (ru ? 'Скачайте .conf или скопируйте содержимое. QR и редактор доступны в соседних вкладках.' : 'Download the .conf or copy its contents. QR and settings are in the other tabs.') :
+        (ru ? 'Доступен синтетический preview. QR и текст можно открыть в соседних вкладках.' : 'Synthetic preview is available. Open QR or text in the other tabs.')) :
+      (config.loading ? (ru ? 'Подождите завершения загрузки.' : 'Wait for loading to finish.') : (ru ? 'Закройте окно и попробуйте ещё раз.' : 'Close this window and try again.'));
+    for (const tab of ['overview', 'qr', 'config', 'edit']) {
       $(`config-preview-tab-${tab}`).setAttribute('aria-selected', String(config.tab === tab));
       $(`config-preview-tab-${tab}`).classList.toggle('is-active', config.tab === tab);
     }
     $('config-preview-tab-edit').hidden = !realCanary;
+    $('config-preview-overview-panel').hidden = !config.open || config.tab !== 'overview';
     $('config-preview-qr-panel').hidden = !config.open || config.tab !== 'qr';
     $('config-preview-config-panel').hidden = !config.open || config.tab !== 'config';
     $('config-preview-edit-panel').hidden = !config.open || config.tab !== 'edit';
@@ -1732,7 +1742,7 @@
     $('config-preview-expiration').textContent = result.expiration ? formatDate(result.expiration) : '—';
     $('config-preview-status').textContent = result.status;
     $('config-preview-qr').setAttribute('aria-label', `${t('configQrTab')}: ${result.clientName} · ${result.status}`);
-    if (realCanary) {
+    if (realCanary && config.tab === 'qr') {
       const qr = document.createElement('img');
       qr.src = result.qrDataUri;
       qr.alt = state.locale === 'ru' ? 'QR конфигурации клиента' : 'Client configuration QR';
@@ -1740,10 +1750,13 @@
       qr.height = 220;
       $('config-preview-qr').replaceChildren(qr);
       $('config-preview-qr-payload').textContent = state.locale === 'ru' ? 'QR содержит приватную конфигурацию' : 'QR contains private configuration';
+    } else if (realCanary) {
+      $('config-preview-qr').replaceChildren();
+      $('config-preview-qr-payload').textContent = '—';
     } else {
       $('config-preview-qr-payload').textContent = result.qrPayload;
     }
-    $('config-preview-text').textContent = result.configText;
+    $('config-preview-text').textContent = config.tab === 'config' ? result.configText : '';
   }
 
   function savedConfigSettings(text) {
@@ -1934,9 +1947,9 @@
     const isCurrentRequest = () => activeConfigPreviewRequest === requestToken &&
       state.configPreview.open && state.configPreview.clientId === id;
     state.actionMenu = { open: false, clientId: null };
-    state.configPreview = { open: true, clientId: id, tab: 'qr', loading: true, saving: false, error: '', result: null };
+    state.configPreview = { open: true, clientId: id, tab: 'overview', loading: true, saving: false, error: '', result: null };
     render();
-    window.setTimeout(() => $('config-preview-tab-qr').focus(), 0);
+    window.setTimeout(() => $('config-preview-tab-overview').focus(), 0);
     try {
       if (typeof adapter.generateConfigurationPreview !== 'function') throw new Error('backend_stub');
       const preview = await adapter.generateConfigurationPreview(id);
@@ -1970,13 +1983,13 @@
   function closeConfigurationPreview({ restoreFocus = true } = {}) {
     const id = state.configPreview.clientId;
     activeConfigPreviewRequest = null;
-    state.configPreview = { open: false, clientId: null, tab: 'qr', loading: false, saving: false, error: '', result: null };
+    state.configPreview = { open: false, clientId: null, tab: 'overview', loading: false, saving: false, error: '', result: null };
     render();
     if (restoreFocus && id) focusClientAction(id);
   }
 
   function setConfigurationTab(tab) {
-    state.configPreview.tab = realCanary && tab === 'edit' ? 'edit' : tab === 'config' ? 'config' : 'qr';
+    state.configPreview.tab = realCanary && tab === 'edit' ? 'edit' : ['overview', 'qr', 'config'].includes(tab) ? tab : 'overview';
     render();
     $(`config-preview-tab-${state.configPreview.tab}`).focus();
   }
@@ -2218,6 +2231,7 @@
       document.querySelector('[data-i18n="deleteEyebrow"]').textContent = `DESTRUCTIVE ACTION / ${interfaceName.toUpperCase()}`;
     }
     renderNavigation();
+    renderSettingsTabs();
     document.querySelectorAll('[data-client-profile]').forEach((button) => {
       const active = button.dataset.clientProfile === state.selectedProfile;
       button.classList.toggle('is-active', active);
@@ -2237,6 +2251,20 @@
     renderDeleteClient();
     renderConfigPreview();
     renderCreatePreview();
+  }
+
+  function renderSettingsTabs() {
+    const ru = state.locale === 'ru';
+    $('settings-tab-configs').innerHTML = ru ? 'Конфигурации<span>Шаблоны новых клиентов</span>' : 'Configurations<span>New client templates</span>';
+    $('settings-tab-server').innerHTML = ru ? 'Сервер<span>Интерфейсы и сеть</span>' : 'Server<span>Interfaces and network</span>';
+    $('client-defaults-note').textContent = ru ? 'Эти параметры применяются к новым клиентам. Конфиг существующего клиента меняется в его меню «Конфигурация → Параметры».' : 'These defaults apply to new clients. Edit an existing client from its Configuration → Settings menu.';
+    for (const tab of ['configs', 'server']) {
+      const button = $(`settings-tab-${tab}`);
+      const active = state.settingsTab === tab;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-selected', String(active));
+      $(`settings-${tab === 'configs' ? 'config' : 'server'}-panel`).hidden = !active;
+    }
   }
 
   function viewFromLocation() {
@@ -2543,6 +2571,13 @@
   }
 
   document.addEventListener('click', (event) => {
+    const settingsTab = event.target.closest('[data-settings-tab]');
+    if (settingsTab) {
+      state.settingsTab = settingsTab.dataset.settingsTab === 'server' ? 'server' : 'configs';
+      renderSettingsTabs();
+      settingsTab.focus();
+      return;
+    }
     if (event.target.closest('#logout-button')) {
       if (realCanary) fetch('/auth/logout', { method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' }, body: '{}' })
@@ -2777,6 +2812,14 @@
   });
 
   document.addEventListener('keydown', (event) => {
+    const settingsTab = event.target.closest('[data-settings-tab]');
+    if (settingsTab && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
+      event.preventDefault();
+      state.settingsTab = state.settingsTab === 'configs' ? 'server' : 'configs';
+      renderSettingsTabs();
+      $(`settings-tab-${state.settingsTab}`).focus();
+      return;
+    }
     if (event.key === 'Tab') {
       const dialog = activeDialog();
       if (dialog) {

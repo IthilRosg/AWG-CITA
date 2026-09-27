@@ -218,11 +218,15 @@ INDEX_HTML = """<!doctype html>
             </div>
             <div class="preview-boundary" data-i18n="configBoundary">UI READY / BACKEND STUB · MOCK DATA ONLY</div>
             <div class="config-tabs" role="tablist" aria-label="Configuration preview format">
-              <button id="config-preview-tab-qr" class="config-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="config-preview-qr-panel" data-config-tab="qr" data-i18n="configQrTab">QR</button>
+              <button id="config-preview-tab-overview" class="config-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="config-preview-overview-panel" data-config-tab="overview">Файл</button>
+              <button id="config-preview-tab-qr" class="config-tab" type="button" role="tab" aria-selected="false" aria-controls="config-preview-qr-panel" data-config-tab="qr" data-i18n="configQrTab">QR</button>
               <button id="config-preview-tab-config" class="config-tab" type="button" role="tab" aria-selected="false" aria-controls="config-preview-config-panel" data-config-tab="config" data-i18n="configTextTab">CONFIG</button>
               <button id="config-preview-tab-edit" class="config-tab" type="button" role="tab" aria-selected="false" aria-controls="config-preview-edit-panel" data-config-tab="edit" hidden>Параметры</button>
             </div>
-            <section id="config-preview-qr-panel" class="config-tab-panel" role="tabpanel" aria-labelledby="config-preview-tab-qr">
+            <section id="config-preview-overview-panel" class="config-tab-panel config-overview-panel" role="tabpanel" aria-labelledby="config-preview-tab-overview">
+              <div class="config-file-card"><span class="config-file-icon" aria-hidden="true">↓</span><div><strong id="config-file-title">Файл конфигурации готов</strong><p id="config-file-copy">Скачайте .conf или скопируйте содержимое. QR и редактор доступны в соседних вкладках.</p></div></div>
+            </section>
+            <section id="config-preview-qr-panel" class="config-tab-panel" role="tabpanel" aria-labelledby="config-preview-tab-qr" hidden>
               <div id="config-preview-qr" class="mock-qr" role="img" aria-label="Mock QR preview"><span>MOCK QR</span></div>
               <code id="config-preview-qr-payload" class="mock-payload">—</code>
               <small class="config-sensitive-note" data-i18n="configSensitiveNote">В production configuration будет sensitive material; в этом prototype оно не создаётся.</small>
@@ -452,6 +456,11 @@ INDEX_HTML = """<!doctype html>
           <h2 id="settings-heading" data-i18n="settingsHeading">Настройки</h2>
           <p class="section-subtitle" data-i18n="settingsSubtitle">Параметры ниже применяются только к новым конфигурациям клиентов.</p>
         </div></div>
+        <div class="settings-tabs" role="tablist" aria-label="Раздел настроек">
+          <button id="settings-tab-configs" class="settings-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="settings-config-panel" data-settings-tab="configs">Конфигурации<span>Шаблоны новых клиентов</span></button>
+          <button id="settings-tab-server" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="settings-server-panel" data-settings-tab="server">Сервер<span>Интерфейсы и сеть</span></button>
+        </div>
+        <div id="settings-server-panel" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-server" hidden>
         <div class="section-heading server-settings-heading"><div>
           <div class="eyebrow">SERVER / LIVE STATE</div>
           <h3 id="server-settings-title">Интерфейсы сервера</h3>
@@ -462,9 +471,12 @@ INDEX_HTML = """<!doctype html>
           <div class="panel server-settings-card" data-server-profile="awg2"><strong>AWG 2.0</strong><div class="server-settings-content" role="status">Загрузка…</div><form class="server-endpoint-form" data-endpoint-profile="awg2"><label>Endpoint host<input name="endpoint" autocomplete="off" required maxlength="253"></label><div class="profile-settings-actions"><span data-endpoint-status="awg2" role="status"></span><button class="button" type="submit">Сохранить endpoint</button></div></form><form class="server-endpoint-form" data-port-profile="awg2"><label>UDP порт<input name="listenPort" type="number" min="1" max="65535" required></label><div class="profile-settings-actions"><span data-port-status="awg2" role="status"></span><button class="button" type="submit">Перенести порт</button></div></form><details class="server-network-details"><summary>Адрес и обфускация</summary><p>Изменение отключит текущие клиентские файлы. Скачайте конфиги заново после применения.</p><form class="server-endpoint-form" data-address-profile="awg2"><label>Адрес интерфейса / CIDR<input name="address" autocomplete="off" required maxlength="18"></label><div class="profile-settings-actions"><span data-address-status="awg2" role="status"></span><button class="button" type="submit">Перенести подсеть</button></div></form><form class="server-endpoint-form" data-obfuscation-profile="awg2"><div class="server-obfuscation-grid"><label>S1<input name="S1" inputmode="numeric" required></label><label>S2<input name="S2" inputmode="numeric" required></label><label>S3<input name="S3" inputmode="numeric" required></label><label>S4<input name="S4" inputmode="numeric" required></label><label>H1<input name="H1" inputmode="numeric" required></label><label>H2<input name="H2" inputmode="numeric" required></label><label>H3<input name="H3" inputmode="numeric" required></label><label>H4<input name="H4" inputmode="numeric" required></label></div><div class="profile-settings-actions"><span data-obfuscation-status="awg2" role="status"></span><button class="button" type="submit">Применить обфускацию</button></div></form></details></div>
           <div class="panel server-settings-card" data-server-profile="wg"><strong>WireGuard</strong><div class="server-settings-content" role="status">Загрузка…</div><form class="server-endpoint-form" data-endpoint-profile="wg"><label>Endpoint host<input name="endpoint" autocomplete="off" required maxlength="253"></label><div class="profile-settings-actions"><span data-endpoint-status="wg" role="status"></span><button class="button" type="submit">Сохранить endpoint</button></div></form><form class="server-endpoint-form" data-port-profile="wg"><label>UDP порт<input name="listenPort" type="number" min="1" max="65535" required></label><div class="profile-settings-actions"><span data-port-status="wg" role="status"></span><button class="button" type="submit">Перенести порт</button></div></form><details class="server-network-details"><summary>Адрес интерфейса</summary><p>Перенос подсети отключит текущие клиентские файлы. Скачайте конфиги заново.</p><form class="server-endpoint-form" data-address-profile="wg"><label>Адрес интерфейса / CIDR<input name="address" autocomplete="off" required maxlength="18"></label><div class="profile-settings-actions"><span data-address-status="wg" role="status"></span><button class="button" type="submit">Перенести подсеть</button></div></form></details></div>
         </div>
+        </div>
+        <div id="settings-config-panel" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-configs">
         <div class="section-heading server-settings-heading"><div>
           <div class="eyebrow">CLIENT / DEFAULTS</div>
           <h3 id="client-defaults-title">Шаблоны конфигов</h3>
+          <p id="client-defaults-note" class="section-subtitle">Эти параметры применяются к новым клиентам. Конфиг существующего клиента меняется в его меню «Конфигурация → Параметры».</p>
         </div></div>
         <div class="profile-settings-grid">
           <form class="panel profile-settings-card" data-template-profile="awg3">
@@ -491,6 +503,7 @@ INDEX_HTML = """<!doctype html>
             <label><span>Keepalive</span><input name="keepalive" type="number" min="0" max="120" required></label>
             <div class="profile-settings-actions"><span data-template-status="wg" role="status"></span><button class="button" type="submit" data-i18n="saveTemplate">Сохранить</button></div>
           </form>
+        </div>
         </div>
       </section>
 

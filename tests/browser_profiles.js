@@ -107,6 +107,9 @@ async function main() {
     await page.locator('#preview-close').click();
     if (!calls.some((value) => value.endsWith('/awg2/clients')) || !calls.some((value) => value.endsWith('/wg/clients'))) throw new Error('profile list routes missing');
     await page.locator('[data-view="settings"]').click();
+    if (await page.locator('#settings-config-panel').getAttribute('hidden') !== null) throw new Error('configuration settings should open first');
+    await page.locator('#settings-tab-server').click();
+    await page.screenshot({ path: '.ops-tmp/awg-cita-browser-artifacts/multi-profile-server-settings.png' });
     await page.waitForFunction(() => document.querySelector('[data-server-profile="awg2"] .server-settings-content')?.textContent.includes('awg-cita2'));
     const endpointForm = page.locator('[data-endpoint-profile="wg"]');
     await endpointForm.locator('[name="endpoint"]').fill('vpn.example.org');
@@ -126,6 +129,7 @@ async function main() {
     await obfuscationForm.locator('[name="H1"]').fill('201');
     await obfuscationForm.locator('button').click();
     await page.waitForFunction(() => document.querySelector('[data-obfuscation-profile="awg2"] [name="H1"]')?.value === '201');
+    await page.locator('#settings-tab-configs').click();
     const form = page.locator('[data-template-profile="wg"]');
     await page.waitForFunction(() => document.querySelector('[data-template-profile="wg"]')?.dataset.loaded === 'true');
     await form.locator('[name="allowed_ips"]').fill('127.0.0.0/8');
@@ -133,6 +137,11 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('[data-template-status="wg"]')?.textContent.includes('Сохранено'));
     if (await form.locator('[name="allowed_ips"]').inputValue() !== '127.0.0.0/8') throw new Error('template readback missing');
     await page.screenshot({ path: '.ops-tmp/awg-cita-browser-artifacts/multi-profile-settings.png' });
+    await page.setViewportSize({ width: 390, height: 844 });
+    if (!(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))) throw new Error('mobile settings overflow');
+    await page.screenshot({ path: '.ops-tmp/awg-cita-browser-artifacts/multi-profile-settings-mobile.png' });
+    await page.locator('#settings-tab-server').click();
+    if (!(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))) throw new Error('mobile server settings overflow');
     console.log('PROFILE_SWITCH=PASS TEMPLATE_SETTINGS=PASS');
   } finally {
     if (browser) await browser.close();

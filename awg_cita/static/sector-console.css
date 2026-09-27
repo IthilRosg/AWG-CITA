@@ -437,6 +437,12 @@ body.modal-open { overflow: hidden; }
 .config-tab:hover,
 .config-tab.is-active { border-bottom-color: var(--red); color: var(--text); }
 .config-tab-panel { min-height: 220px; }
+.config-overview-panel { min-height: 118px; }
+.config-file-card { display: flex; align-items: center; gap: 18px; min-height: 118px; padding: 20px; border: 1px solid var(--line-soft); background: var(--panel-soft); }
+.config-file-card strong { font-size: 14px; }
+.config-file-card p { margin: 8px 0 0; color: var(--dim); font-size: 12px; line-height: 1.5; }
+.config-file-icon { display: grid; place-items: center; flex: 0 0 42px; height: 42px; border: 1px solid var(--red); color: var(--red); font: 24px var(--mono); }
+#config-preview-modal .modal-actions { position: sticky; bottom: 0; z-index: 1; background: var(--panel); }
 .config-edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
 .config-edit-grid label { display: grid; gap: 6px; min-width: 0; font: 11px var(--mono); }
 .config-edit-grid input { width: 100%; min-height: 38px; padding: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font: inherit; }
@@ -1015,6 +1021,12 @@ td.mono { color: var(--dim); font-size: 10px; }
 .profile-choice.is-active { border-color: var(--red); color: var(--red); }
 .profile-choice:focus-visible, .profile-settings-card input:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
 .profile-settings-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.settings-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 24px 0 8px; }
+.settings-tab { display: grid; gap: 7px; padding: 15px 18px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; text-align: left; font-size: 14px; font-weight: 700; }
+.settings-tab span { color: var(--dim); font-size: 11px; font-weight: 400; }
+.settings-tab:hover, .settings-tab.is-active { border-color: var(--red); background: var(--panel-strong); }
+.settings-tab:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+.settings-panel[hidden] { display: none; }
 .profile-settings-card { padding: 20px; }
 .profile-settings-card h3 { margin: 8px 0 18px; }
 .profile-settings-card label { display: grid; gap: 6px; margin: 14px 0; font-size: 12px; }
@@ -1040,6 +1052,7 @@ td.mono { color: var(--dim); font-size: 10px; }
 .server-obfuscation-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .server-obfuscation-grid input { min-width: 0; }
 @media (max-width: 1100px) { .profile-settings-grid { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { .settings-tabs { gap: 7px; } .settings-tab { padding: 12px; font-size: 12px; } .settings-tab span { font-size: 10px; } .config-file-card { padding: 15px; } }
 
 @media (max-width: 820px) {
   .page-header { align-items: flex-start; flex-direction: column; }
