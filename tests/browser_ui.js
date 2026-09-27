@@ -480,11 +480,14 @@ async function assertDesktop(page, diagnostics) {
   await page.locator('#client-actions-menu [data-client-action="config"]').click();
   if (await page.locator('#config-preview-modal').getAttribute('hidden') !== null) throw new Error('configuration preview did not open');
   await page.waitForFunction(() => Boolean(window.__AWG_CITA_TEST_HOOKS__.state.configPreview.result));
-  if (await page.locator('#config-preview-tab-qr').getAttribute('aria-selected') !== 'true') throw new Error('QR tab was not selected by default');
+  if (await page.locator('#config-preview-tab-overview').getAttribute('aria-selected') !== 'true') throw new Error('file summary was not selected by default');
+  if (await page.locator('#config-preview-qr-panel').getAttribute('hidden') !== '') throw new Error('QR should start folded');
+  await page.screenshot({ path: `${artifacts}/sprint4-configuration-summary.png` });
   const configPreview = await page.evaluate(() => window.__AWG_CITA_TEST_HOOKS__.state.configPreview.result);
   if (!configPreview || configPreview.status !== 'MOCK_PREVIEW' || !String(configPreview.qrPayload).startsWith('AWG-CITA-MOCK-QR|')) throw new Error('configuration preview did not expose approved mock QR data');
   if (/private[_ -]?key|public[_ -]?key|secret|endpoint|production|BEGIN [A-Z ]+ KEY/i.test(JSON.stringify(configPreview))) throw new Error('configuration preview contains forbidden secret-bearing data');
   await page.waitForFunction(() => document.querySelectorAll('.toast').length === 0, null, { timeout: 5000 });
+  await page.locator('#config-preview-tab-qr').click();
   await page.screenshot({ path: `${artifacts}/sprint4-configuration-qr.png` });
   await page.locator('#config-preview-tab-config').click();
   if (await page.locator('#config-preview-config-panel').getAttribute('hidden') !== null) throw new Error('configuration text tab did not open');
