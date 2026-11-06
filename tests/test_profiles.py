@@ -11,7 +11,7 @@ class ClientTemplateTests(unittest.TestCase):
         value = validate({'dns_server': '127.0.0.1', 'allowed_ips': '127.0.0.0/8, 127.1.0.0/16',
                           'mtu': 1420, 'keepalive': 25})
         self.assertEqual(value['allowed_ips'], '127.0.0.0/8, 127.1.0.0/16')
-        for routes in ('127.0.0.1/8', '127.0.0.0/8, 127.0.0.0/8', '::/0', '0.0.0.0/0; PostUp = bad'):
+        for routes in ('127.0.0.1/8', '127.0.0.0/8, 127.0.0.0/8', '0.0.0.0/0; PostUp = bad'):
             with self.subTest(routes=routes), self.assertRaises(ValueError):
                 validate({**value, 'allowed_ips': routes})
 

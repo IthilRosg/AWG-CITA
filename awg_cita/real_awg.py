@@ -10,16 +10,33 @@ import re
 import time
 from typing import Any, Callable
 
-from .lifecycle import CLIENT_FIELDS, ClientRecord, ClientUpdate, LifecycleError
+from .lifecycle import CLIENT_FIELDS, MAX_CLIENT_RECORDS, ClientRecord, ClientUpdate, LifecycleError
 from .snapshot import parse_awg_dump, classify_peer
 
 _MARKER = b'# AWG-CITA-DISABLED '
 _KEY = re.compile(rb'[A-Za-z0-9+/]{43}=')
 _SECTION = re.compile(rb'\[[A-Za-z][A-Za-z0-9]*\][ \t]*\n')
 _PUBLIC = re.compile(rb'PublicKey[ \t]*=[ \t]*([^ \t\r\n]+)[ \t]*\n')
-_ALLOWED = re.compile(rb'AllowedIPs[ \t]*=[ \t]*([^ \t\r\n]+)[ \t]*\n')
+_ALLOWED = re.compile(rb'AllowedIPs[ \t]*=[ \t]*([^\r\n]+?)[ \t]*\n')
 _DNS_LABEL = re.compile(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z')
 ACTION_HELPER_TIMEOUT = 300  # Includes bounded lock, restart/recovery and one rollback.
+MAX_INVENTORY_BYTES = 262144
+
+
+def peer_routes(value: str) -> frozenset:
+    routes = [ipaddress.ip_network(part.strip(), strict=True) for part in value.split(',')]
+    if not 1 <= len(routes) <= 8 or len(set(routes)) != len(routes):
+        raise ValueError('invalid peer routes')
+    return frozenset(routes)
+
+
+def interface_addresses(value: str) -> list:
+    addresses = [ipaddress.ip_interface(part.strip()) for part in value.split(',')]
+    if (not 1 <= len(addresses) <= 2 or addresses[0].version != 4 or
+            not 24 <= addresses[0].network.prefixlen <= 29 or
+            (len(addresses) == 2 and addresses[1].version != 6)):
+        raise ValueError('invalid interface addresses')
+    return addresses
 
 
 def valid_endpoint_host(value: str) -> bool:
@@ -50,7 +67,7 @@ def _stanza_key(block: bytes) -> str:
     if len(routes) != 1:
         raise ValueError('peer must have one route')
     try:
-        ipaddress.ip_network(routes[0].decode('ascii'), strict=True)
+        peer_routes(routes[0].decode('ascii'))
     except (ValueError, UnicodeError) as error:
         raise ValueError('invalid peer route') from error
     return _valid_key(keys[0])
@@ -60,7 +77,7 @@ class PersistentCanaryConfig:
     """Preserve original bytes, including unknown AWG parameters and comments."""
 
     def __init__(self, source: bytes) -> None:
-        if not isinstance(source, bytes) or not 1 <= len(source) <= 65536 or b'\0' in source or b'\r' in source:
+        if not isinstance(source, bytes) or not 1 <= len(source) <= MAX_INVENTORY_BYTES or b'\0' in source or b'\r' in source:
             raise ValueError('invalid AWG config')
         lines = source.splitlines(keepends=True)
         if not lines or lines[0] != b'[Interface]\n' or not source.endswith(b'\n'):
@@ -167,7 +184,7 @@ class CanaryPeerController:
             networks = [ipaddress.ip_network(item.strip(), strict=True) for item in client_allowed_ips.split(',')]
         except ValueError as error:
             raise ValueError('invalid client template') from error
-        if (not 1 <= len(networks) <= 8 or any(network.version != 4 for network in networks) or
+        if (not 1 <= len(networks) <= 8 or
             type(client_mtu) not in (int, type(None)) or (client_mtu is not None and not 1280 <= client_mtu <= 1500) or
             type(client_keepalive) is not int or not 0 <= client_keepalive <= 120):
             raise ValueError('invalid client template')
@@ -178,11 +195,11 @@ class CanaryPeerController:
     def list_clients(self) -> list[ClientRecord]:
         persisted = PersistentCanaryConfig(self._read_config())
         raw = self._read_dump()
-        if not isinstance(raw, str) or len(raw.encode('utf-8')) > 65536:
+        if not isinstance(raw, str) or len(raw.encode('utf-8')) > MAX_INVENTORY_BYTES:
             raise ValueError('invalid runtime dump')
         parsed = parse_awg_dump(raw)
         rows = [line.split('\t') for line in raw.splitlines() if line.strip()][1:]
-        if len(rows) != parsed['peer_count'] or len(rows) > 64 or len(persisted.peers()) > 64:
+        if len(rows) != parsed['peer_count'] or len(rows) > MAX_CLIENT_RECORDS or len(persisted.peers()) > MAX_CLIENT_RECORDS:
             raise ValueError('peer inventory bound exceeded')
         runtime: dict[str, dict[str, Any]] = {}
         for row, stats in zip(rows, parsed['peers']):
@@ -191,7 +208,7 @@ class CanaryPeerController:
                 raise ValueError('runtime differs from persistent config')
             block = persisted._entries[key][2]
             route = next(_ALLOWED.fullmatch(line).group(1).decode('ascii') for line in block.splitlines(keepends=True) if _ALLOWED.fullmatch(line))
-            if row[3] != route:
+            if peer_routes(row[3]) != peer_routes(route):
                 raise ValueError('runtime route differs from persistent config')
             runtime[key] = stats
         if set(runtime) != {key for key, state in persisted.peers().items() if state == 'enabled'}:
@@ -211,12 +228,14 @@ class CanaryPeerController:
             metadata_lines = [line[len(b'# AWG-CITA-META '):].strip() for line in block.splitlines()
                               if line.startswith(b'# AWG-CITA-META ')]
             name, tags = 'Peer ' + peer_id[5:13], []
+            created_at = None
             if metadata_lines:
                 if len(metadata_lines) != 1 or len(metadata_lines[0]) > 1024:
                     raise ValueError('invalid canary metadata')
                 try:
                     metadata = json.loads(base64.b64decode(metadata_lines[0], validate=True))
-                    if (not isinstance(metadata, dict) or set(metadata) != {'name', 'tags', 'nonce'} or
+                    if (not isinstance(metadata, dict) or set(metadata) not in (
+                            {'name', 'tags', 'nonce'}, {'name', 'tags', 'nonce', 'createdAt'}) or
                         not isinstance(metadata['nonce'], str) or
                         not re.fullmatch(r'[A-Za-z0-9_-]{8,128}', metadata['nonce'])):
                         raise ValueError('invalid canary metadata')
@@ -224,11 +243,13 @@ class CanaryPeerController:
                     LifecycleService._validate_name(metadata['name'])
                     LifecycleService._validate_tags(metadata['tags'])
                     name, tags = metadata['name'], metadata['tags']
+                    if 'createdAt' in metadata:
+                        created_at = dt.date.fromisoformat(metadata['createdAt']).isoformat()
                 except (ValueError, UnicodeError, LifecycleError) as error:
                     raise ValueError('invalid canary metadata') from None
             records.append({
                 'id': peer_id, 'name': name, 'status': status,
-                'lastHandshakeAt': stamp, 'lastSeenAt': stamp, 'createdAt': None,
+                'lastHandshakeAt': stamp, 'lastSeenAt': stamp, 'createdAt': created_at,
                 'expiration': '', 'rxBytes': stats['rx_bytes'] if stats else 0,
                 'txBytes': stats['tx_bytes'] if stats else 0, 'notes': '', 'tags': tags,
                 'warning': 'Lifecycle state is disabled.' if state == 'disabled' else '',
@@ -264,7 +285,7 @@ class CanaryPeerController:
         before = self.list_clients()
         source = self._read_config()
         config = PersistentCanaryConfig(source)
-        if len(config.peers()) >= 64:
+        if len(config.peers()) >= MAX_CLIENT_RECORDS:
             raise ValueError('canary peer capacity exhausted')
         marker = b'# AWG-CITA-NONCE ' + hashlib.sha256(nonce.encode('ascii')).hexdigest().encode() + b'\n'
         if marker in source:
@@ -272,7 +293,7 @@ class CanaryPeerController:
         routes = []
         for _status, _representation, block in config._entries.values():
             route = next(_ALLOWED.fullmatch(line).group(1).decode('ascii') for line in block.splitlines(keepends=True) if _ALLOWED.fullmatch(line))
-            routes.append(ipaddress.ip_network(route))
+            routes.extend(peer_routes(route))
         interface = source.split(b'\n[Peer]\n', 1)[0].splitlines()
         fields: dict[str, str] = {}
         for line in interface[1:]:
@@ -287,7 +308,8 @@ class CanaryPeerController:
                 raise ValueError('duplicate canary interface field')
             fields[key] = value
         try:
-            interface_address = ipaddress.ip_interface(fields['Address'])
+            addresses = interface_addresses(fields['Address'])
+            interface_address = addresses[0]
             listen_port = int(fields['ListenPort'])
         except (KeyError, ValueError) as error:
             raise ValueError('unexpected canary profile') from error
@@ -297,13 +319,27 @@ class CanaryPeerController:
             raise ValueError('unexpected canary profile')
         address = next((f'{candidate}/32' for candidate in interface_address.network.hosts()
                         if candidate != interface_address.ip and
-                        not any(ipaddress.ip_network(f'{candidate}/32').overlaps(route) for route in routes)), None)
+                        not any(ipaddress.ip_network(f'{candidate}/32').overlaps(route)
+                                for route in routes if route.version == 4)), None)
         if address is None:
             raise ValueError('canary address capacity exhausted')
+        if len(addresses) == 2:
+            ipv6 = addresses[1]
+            offset = int(ipaddress.ip_interface(address).ip) - int(interface_address.network.network_address)
+            candidate = ipaddress.IPv6Address(int(ipv6.network.network_address) + offset)
+            candidate_route = ipaddress.ip_network(f'{candidate}/128')
+            if (candidate not in ipv6.network or candidate == ipv6.ip or
+                    any(candidate_route.overlaps(route) for route in routes if route.version == 6)):
+                raise ValueError('canary IPv6 address collision')
+            address += f', {candidate}/128'
         if not valid_endpoint_host(self._endpoint_host):
             raise ValueError('invalid canary endpoint')
         try:
-            dns_server = str(ipaddress.ip_address(self._dns_server))
+            from .client_templates import validate
+            dns_server = validate({'dns_server': self._dns_server,
+                                   'allowed_ips': self._client_allowed_ips,
+                                   'mtu': self._client_mtu or 1420,
+                                   'keepalive': self._client_keepalive})['dns_server']
         except ValueError as error:
             raise ValueError('invalid canary DNS') from error
         required_obfuscation = ('S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4')
@@ -505,7 +541,7 @@ class RealAwgLifecycleAdapter:
             out, err = AwgReader._run(argv, ACTION_HELPER_TIMEOUT)
         else:
             out, err = AwgReader._run(argv, 15)
-        if err or len(out.encode('utf-8')) > (131072 if operation in {'create', 'config', 'config-update'} else 65536):
+        if err or len(out.encode('utf-8')) > MAX_INVENTORY_BYTES:
             raise LifecycleError('awg_command_failed')
 
         def unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -545,7 +581,7 @@ class RealAwgLifecycleAdapter:
 
     def list_clients(self) -> list[ClientRecord]:
         records = self._call('list')['clients']
-        if not isinstance(records, list) or len(records) > 64:
+        if not isinstance(records, list) or len(records) > MAX_CLIENT_RECORDS:
             raise LifecycleError('awg_command_failed')
         return [self._record(record) for record in records]
 
@@ -563,11 +599,11 @@ class RealAwgLifecycleAdapter:
                 value['interface'] != {'awg3': 'awg-canary0', 'awg2': 'awg-cita2', 'wg': 'awg-cita-wg'}[value['profile']] or
                 not valid_endpoint_host(value['endpoint']) or value['state'] != 'ACTIVE' or
                 type(value['listenPort']) is not int or not 1 <= value['listenPort'] <= 65535 or
-                type(value['clientCount']) is not int or not 0 <= value['clientCount'] <= 64 or
+                type(value['clientCount']) is not int or not 0 <= value['clientCount'] <= MAX_CLIENT_RECORDS or
                 not isinstance(value['revision'], str) or not re.fullmatch(r'[0-9a-f]{64}', value['revision'])):
             raise LifecycleError('awg_command_failed')
         try:
-            address = ipaddress.ip_interface(value['address'])
+            address = interface_addresses(value['address'])[0]
         except (ValueError, TypeError) as error:
             raise LifecycleError('awg_command_failed') from error
         if address.version != 4:

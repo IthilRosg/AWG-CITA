@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import tempfile
@@ -6,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from awg_cita.server_endpoint import revision
+from awg_cita.real_awg import MAX_INVENTORY_BYTES
 from awg_cita.server_port import (apply_port, preflight_firewall, recover_pending, replace_config_port,
                                   replace_metadata_port, validate_request, _start_journal)
 
@@ -14,6 +16,46 @@ CONFIG = b'[Interface]\nAddress = 127.0.0.1/24\nListenPort = 47193\nPrivateKey =
 
 
 class PortTests(unittest.TestCase):
+    def test_large_config_port_change_preserves_content_and_size_limit(self):
+        raw = CONFIG + b'#' + b'x' * (MAX_INVENTORY_BYTES - len(CONFIG) - 2) + b'\n'
+        changed = replace_config_port(raw, 47193, 48193)
+        self.assertEqual(changed, raw.replace(b'ListenPort = 47193', b'ListenPort = 48193'))
+        self.assertEqual(replace_config_port(changed, 48193, 47193), raw)
+        with self.assertRaisesRegex(ValueError, 'server config too long'):
+            replace_config_port(raw + b'\n', 47193, 48193)
+
+    def test_large_config_journal_recovery_and_oversized_rejection(self):
+        raw = CONFIG + b'#' + b'x' * (MAX_INVENTORY_BYTES - len(CONFIG) - 2) + b'\n'
+        metadata = b'{"listen_port":47193}\n'
+        state = {'config': replace_config_port(raw, 47193, 48193)}
+        journal = {'profile': 'wg', 'oldPort': 47193, 'newPort': 48193,
+                   'config': base64.b64encode(raw).decode(), 'metadata': base64.b64encode(metadata).decode()}
+
+        def read(path, limit):
+            data = json.dumps(journal).encode() if path.name.endswith('.pending') else metadata
+            self.assertLessEqual(len(data), limit)
+            return data
+
+        def write(expected, replacement):
+            self.assertEqual(state['config'], expected)
+            state['config'] = replacement
+
+        with (patch('awg_cita.server_port.read_root_settings', side_effect=read),
+              patch('awg_cita.server_port._run', return_value=b'Status: active\n'),
+              patch('awg_cita.server_port._finish_journal') as finish):
+            self.assertTrue(recover_pending(profile='wg', path=Path('/profile'), limit=512,
+                                            read_config=lambda: state['config'], write_config=write,
+                                            sync_runtime=lambda: None,
+                                            verify_runtime=lambda port: self.assertEqual(port, 47193)))
+            self.assertEqual(state['config'], raw)
+            finish.assert_called_once_with('wg')
+            journal['config'] = base64.b64encode(raw + b'\n').decode()
+            with self.assertRaisesRegex(ValueError, 'invalid port journal'):
+                recover_pending(profile='wg', path=Path('/profile'), limit=512,
+                                read_config=lambda: state['config'], write_config=write,
+                                sync_runtime=lambda: self.fail('oversized journal must not restart'),
+                                verify_runtime=lambda _port: None)
+
     def test_config_replacement_preserves_other_fields(self):
         changed = replace_config_port(CONFIG, 47193, 48193)
         self.assertEqual(changed, CONFIG.replace(b'ListenPort = 47193', b'ListenPort = 48193'))

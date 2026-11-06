@@ -1,12 +1,13 @@
 import base64
+import json
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from awg_cita.real_awg import PersistentCanaryConfig
+from awg_cita.real_awg import MAX_INVENTORY_BYTES, PersistentCanaryConfig
 from awg_cita.server_network import (apply_change, recover_pending, rewrite_client_address, rewrite_obfuscation,
                                      rewrite_server_address, validate_address_change,
-                                     validate_obfuscation)
+                                     validate_obfuscation, _parse_journal)
 
 
 OLD = '127.32.0.1/24'
@@ -31,6 +32,38 @@ def fixture() -> bytes:
 
 
 class ServerNetworkTests(unittest.TestCase):
+    def test_large_obfuscation_config_preserves_unrelated_content_and_limit(self):
+        old = {'S1': '20', 'S2': '24', 'S3': '0', 'S4': '0',
+               'H1': '101', 'H2': '102', 'H3': '103', 'H4': '104'}
+        new = {**old, 'H1': '201'}
+        header = ('[Interface]\n' + ''.join(f'{key} = {value}\n' for key, value in old.items())).encode()
+        raw = header + b'#' + b'x' * (MAX_INVENTORY_BYTES - len(header) - 2) + b'\n'
+        changed = rewrite_obfuscation(raw, old, new)
+        self.assertEqual(changed, raw.replace(b'H1 = 101\n', b'H1 = 201\n'))
+        self.assertEqual(rewrite_obfuscation(changed, new, old), raw)
+        with self.assertRaisesRegex(ValueError, 'obfuscation config too long'):
+            rewrite_obfuscation(raw + b'\n', old, new)
+
+    def test_large_network_journal_roundtrip_and_oversized_config_rejection(self):
+        config = b'[Interface]\n' + b'#' * (MAX_INVENTORY_BYTES - 13) + b'\n'
+        self.assertEqual(len(config), MAX_INVENTORY_BYTES)
+        files = {'config': (config, config.replace(b'#', b'x', 1)),
+                 'metadata': (b'{"old":1}', b'{"new":1}')}
+        journal = {'profile': 'wg', 'kind': 'address', 'files':
+                   {name: [base64.b64encode(part).decode() for part in pair] for name, pair in files.items()}}
+
+        def read(_path, limit):
+            raw = json.dumps(journal).encode()
+            self.assertGreater(len(raw), 512000)
+            self.assertLessEqual(len(raw), limit)
+            return raw
+
+        with patch('awg_cita.server_network.read_root_settings', side_effect=read):
+            self.assertEqual(_parse_journal('wg'), files)
+            journal['files']['config'][0] = base64.b64encode(config + b'\n').decode()
+            with self.assertRaises(ValueError):
+                _parse_journal('wg')
+
     def test_address_rewrite_maps_enabled_and_disabled_peers(self):
         result = rewrite_server_address(fixture(), OLD, NEW)
         parsed = PersistentCanaryConfig(result)

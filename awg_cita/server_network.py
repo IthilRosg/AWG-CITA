@@ -18,7 +18,8 @@ import sys
 import time
 from pathlib import Path
 
-from .real_awg import PersistentCanaryConfig
+from .lifecycle import MAX_CLIENT_RECORDS
+from .real_awg import MAX_INVENTORY_BYTES, PersistentCanaryConfig
 from .server_endpoint import BACKUPS, _fsync_directory, _write_new, read_root_settings, revision
 
 _OBF_KEYS = ('S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4')
@@ -26,6 +27,10 @@ _ADDRESS = re.compile(rb'Address = ([0-9./]+)\n')
 _ROUTE = re.compile(rb'AllowedIPs = ([0-9./]+)\n')
 _REVISION = re.compile(r'[0-9a-f]{64}\Z')
 _PROFILES = frozenset({'awg2', 'wg'})
+# Before/after base64 copies of the server, metadata and bounded client files.
+# Individual metadata/client limits remain 2048/2400 bytes.
+_MAX_JOURNAL_BYTES = (2 * 4 * ((MAX_INVENTORY_BYTES + 2) // 3) +
+                      2 * 4 * ((2048 + 2) // 3) + MAX_CLIENT_RECORDS * (2 * 3200 + 64) + 4096)
 
 
 def validate_address_change(old: str, new: str) -> tuple[ipaddress.IPv4Interface, ipaddress.IPv4Interface]:
@@ -126,6 +131,8 @@ def validate_obfuscation(value: object) -> dict[str, str]:
 
 
 def rewrite_obfuscation(raw: bytes, old: dict[str, str], new: dict[str, str]) -> bytes:
+    if not 1 <= len(raw) <= MAX_INVENTORY_BYTES:
+        raise ValueError('obfuscation config too long')
     validate_obfuscation(old)
     validate_obfuscation(new)
     if old == new:
@@ -137,7 +144,7 @@ def rewrite_obfuscation(raw: bytes, old: dict[str, str], new: dict[str, str]) ->
         if result.count(before) != 1:
             raise ValueError('obfuscation drift')
         result = result.replace(before, after, 1)
-    if len(result) > 65536:
+    if len(result) > MAX_INVENTORY_BYTES:
         raise ValueError('obfuscation config too long')
     return result
 
@@ -218,7 +225,7 @@ def _write_journal(profile: str, kind: str, files: dict[str, tuple[bytes, bytes]
                               base64.b64encode(after).decode('ascii')]
                        for name, (before, after) in files.items()}}
     raw = (json.dumps(value, separators=(',', ':')) + '\n').encode('ascii')
-    if len(raw) > 512000:
+    if len(raw) > _MAX_JOURNAL_BYTES:
         raise ValueError('network journal too long')
     temp = BACKUPS / ('.' + pending.name + '-' + str(os.getpid()))
     try:
@@ -278,7 +285,7 @@ def preflight_route(target: str, current: str, interface: str) -> None:
 
 def _parse_journal(profile: str) -> dict[str, tuple[bytes, bytes]] | None:
     try:
-        raw = read_root_settings(_pending_path(profile), 512000)
+        raw = read_root_settings(_pending_path(profile), _MAX_JOURNAL_BYTES)
     except FileNotFoundError:
         return None
     value = json.loads(raw)
@@ -293,7 +300,7 @@ def _parse_journal(profile: str) -> dict[str, tuple[bytes, bytes]] | None:
                 not isinstance(pair, list) or len(pair) != 2 or any(not isinstance(item, str) for item in pair)):
             raise ValueError('invalid network journal')
         before, after = (base64.b64decode(item, validate=True) for item in pair)
-        limit = 65536 if name == 'config' else 2048 if name == 'metadata' else 2400
+        limit = MAX_INVENTORY_BYTES if name == 'config' else 2048 if name == 'metadata' else 2400
         if not 1 <= len(before) <= limit or not 1 <= len(after) <= limit or before == after:
             raise ValueError('invalid network journal')
         files[name] = (before, after)

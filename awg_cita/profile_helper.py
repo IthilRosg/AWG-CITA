@@ -16,7 +16,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .canary_helper import _read_create_request, _root_regular, _write_all
-from .real_awg import CanaryPeerController, PersistentCanaryConfig, _valid_key, valid_endpoint_host
+from .real_awg import (MAX_INVENTORY_BYTES, CanaryPeerController, PersistentCanaryConfig,
+                       _valid_key, interface_addresses, valid_endpoint_host)
 
 AWG = '/usr/local/bin/awg'
 ROOT = Path('/etc/amnezia/amneziawg')
@@ -93,7 +94,8 @@ class ProfileOps:
         except (ValueError, TypeError) as error:
             raise ValueError('invalid profile DNS') from error
         try:
-            parsed_address = ipaddress.ip_interface(address)
+            addresses = interface_addresses(address)
+            parsed_address = addresses[0]
         except (ValueError, TypeError) as error:
             raise ValueError('invalid profile address') from error
         if (parsed_address.version != 4 or not 24 <= parsed_address.network.prefixlen <= 29 or
@@ -103,10 +105,10 @@ class ProfileOps:
                 isinstance(item, str) and item.isascii() and item.isdecimal() and
                 0 <= int(item) <= 4294967295 for item in obf.values()):
             raise ValueError('invalid profile obfuscation')
-        return endpoint, str(ipaddress.ip_address(dns)), str(parsed_address), port, obf
+        return endpoint, str(ipaddress.ip_address(dns)), ', '.join(map(str, addresses)), port, obf
 
     def read_config(self) -> bytes:
-        raw = _read_root_file(self.config, 65536)
+        raw = _read_root_file(self.config, MAX_INVENTORY_BYTES)
         PersistentCanaryConfig(raw)
         return raw
 
@@ -142,7 +144,7 @@ class ProfileOps:
             temp.unlink(missing_ok=True)
 
     def command(self, args: tuple[str, ...], *, input_key: str | None = None,
-                limit: int = 65536, timeout: int = 5) -> bytes:
+                limit: int = MAX_INVENTORY_BYTES, timeout: int = 5) -> bytes:
         if input_key is not None:
             _valid_key(input_key.encode('ascii'))
         result = subprocess.run(args, input=(input_key + '\n').encode('ascii') if input_key else None,
@@ -197,15 +199,15 @@ class ProfileOps:
         runtime = self.read_dump().splitlines()[0].split('\t')
         if len(runtime) < 3 or runtime[2] != str(port):
             raise ValueError('profile runtime port drift')
-        result = subprocess.run(('/usr/sbin/ip', '-j', '-4', 'address', 'show', 'dev', self.interface),
+        result = subprocess.run(('/usr/sbin/ip', '-j', 'address', 'show', 'dev', self.interface),
                                 capture_output=True, timeout=5, env=_ENV)
         if result.returncode or len(result.stdout) > 8192:
             raise ValueError('profile runtime address unavailable')
         interfaces = json.loads(result.stdout)
-        parsed = ipaddress.ip_interface(address)
+        addresses = interface_addresses(address)
         if (not isinstance(interfaces, list) or len(interfaces) != 1 or
-                not any(item.get('local') == str(parsed.ip) and item.get('prefixlen') == parsed.network.prefixlen
-                        for item in interfaces[0].get('addr_info', []))):
+                not all(any(item.get('local') == str(parsed.ip) and item.get('prefixlen') == parsed.network.prefixlen
+                            for item in interfaces[0].get('addr_info', [])) for parsed in addresses)):
             raise ValueError('profile runtime address drift')
         self.controller().list_clients()
 

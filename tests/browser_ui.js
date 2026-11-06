@@ -164,13 +164,15 @@ async function assertDesktop(page, diagnostics) {
     }
     let oversized = 'accepted';
     try {
-      hooks.normalizeClients(Array.from({ length: 65 }, (_, index) => ({ ...source, id: `peer-test-${index}` })));
+      hooks.normalizeClients(Array.from({ length: 257 }, (_, index) => ({ ...source, id: `peer-test-${index}` })));
     } catch (error) {
       oversized = String(error?.message || error);
     }
     return { privateKey: safe.privateKey, extraField: safe.extraField, invalidId, oversized };
   });
   if (clientProjection.privateKey || clientProjection.extraField || clientProjection.invalidId !== 'malformed_adapter_result' || clientProjection.oversized !== 'malformed_adapter_result') throw new Error(`client normalization did not enforce the bounded projection: ${JSON.stringify(clientProjection)}`);
+  const filenameCases = await page.evaluate(() => ['Work_PC', 'Рабочий ноутбук', '../CON', 'CON', 'LPT1.conf', 'name.conf', 'trail. '].map(window.__AWG_CITA_TEST_HOOKS__.clientConfigurationFilename));
+  if (JSON.stringify(filenameCases) !== JSON.stringify(['Work_PC.conf', 'Рабочий ноутбук.conf', '..-CON.conf', 'client-CON.conf', 'client-LPT1.conf', 'name.conf', 'trail.conf'])) throw new Error('unsafe or incorrect download filename');
   const malformedClientResults = await page.evaluate(() => {
     const hooks = window.__AWG_CITA_TEST_HOOKS__;
     const source = hooks.state.clients[0];

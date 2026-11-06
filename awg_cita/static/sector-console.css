@@ -1140,3 +1140,9 @@ td.mono { color: var(--dim); font-size: 10px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+
+.config-safety { margin: 12px 0; padding: 10px 14px; border: 1px solid currentColor; border-radius: 8px; font-size: .85rem; line-height: 1.5; }
+.config-safety p { margin: 6px 0; }
+.config-safety summary { cursor: pointer; font-weight: 600; }
+.session-notice { position: fixed; inset: 12px 12px auto; z-index: 1000; padding: 16px; background: #242c38; color: #fff; border: 1px solid #edb963; border-radius: 8px; }
+.session-notice a { color: #a6d8ff; }

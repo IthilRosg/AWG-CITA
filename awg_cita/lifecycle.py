@@ -110,7 +110,7 @@ _LIFECYCLE_ERROR_CODES = frozenset({
     "awg_timeout", "configuration_failed", "awg_command_failed",
 })
 _MAX_COUNTER = (1 << 53) - 1
-MAX_CLIENT_RECORDS = 64
+MAX_CLIENT_RECORDS = 256
 _MAX_AUDIT_EVENTS = 256
 _MAX_IDEMPOTENCY_RESULTS = 256
 _CONFIG_PREVIEW_ID_RE = re.compile(r"^config-preview-[A-Za-z0-9_-]{1,96}$")

@@ -105,7 +105,7 @@ async function main() {
     const downloadPromise = page.waitForEvent('download');
     await page.locator('#create-config-download').click();
     const download = await downloadPromise;
-    assert.match(download.suggestedFilename(), /\.conf$/);
+    assert.equal(download.suggestedFilename(), client.name + '.conf');
     assert.equal(await (await require('node:fs/promises').readFile(await download.path(), 'utf8')), config);
     await page.locator('#preview-done').click();
     assert.equal(await page.locator('#create-config-text').inputValue(), '');

@@ -147,6 +147,10 @@ class Backend(BaseHTTPRequestHandler):
         elif self.path == '/api/clients':
             self.respond(200 if self.headers.get('Cookie') == COOKIE else 401,
                          {'clients': []} if self.headers.get('Cookie') == COOKIE else {'error_code': 'unauthorized'})
+        elif self.path == '/api/actions':
+            self.respond(200 if self.headers.get('Cookie') == COOKIE else 401,
+                         {'schema_version': 1, 'source': 'server_audit', 'events': [], 'truncated': False}
+                         if self.headers.get('Cookie') == COOKIE else {'error_code': 'unauthorized'})
         else:
             self.respond(404, {'error_code': 'not_found'})
 
@@ -264,6 +268,19 @@ class RateLimitRelayTests(unittest.TestCase):
         self.assertEqual(json.loads(body), {'clients': []})
         self.assertEqual(Backend.seen[-1], ('/api/clients', COOKIE, HOST))
         self.assertEqual(Backend.seen_operators[-1], ['test-operator'])
+
+    def test_action_history_uses_private_session_and_read_rate_limit(self):
+        self.assertEqual(self.request('GET', '/api/actions')[0], 401)
+        self.assertEqual(Backend.seen, [])
+        status, _, body = self.request('GET', '/api/actions', headers={'Cookie': 'unrelated=private; ' + COOKIE})
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)['source'], 'server_audit')
+        self.assertEqual(Backend.seen[-1], ('/api/actions', COOKIE, HOST))
+        globals_ = self.relay.RequestHandlerClass.do_GET.__globals__
+        globals_['client_tokens'] = 0.0
+        globals_['client_last'] = __import__('time').monotonic()
+        self.assertEqual(self.request('GET', '/api/actions', headers={'Cookie': COOKIE})[0], 429)
+        self.assertEqual(len(Backend.seen), 1)
 
     def test_missing_or_forged_identity_never_reaches_backend(self):
         for actor in ('wrong-operator', ''):

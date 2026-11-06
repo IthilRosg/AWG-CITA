@@ -214,7 +214,7 @@ class Handler(BaseHTTPRequestHandler):
   if actor is None:self.send_error(401);return
   path=urlsplit(self.path).path
   if path=="/api/status" and not permitted():self.send_response(429);self.send_header("Content-Length","0");self.end_headers();return
-  is_client_read=(path=="/api/clients" or bool(re.fullmatch(r"/api/clients/peer-[0-9a-f]{16}/config",self.path)) or
+  is_client_read=(path=="/api/clients" or self.path=="/api/actions" or bool(re.fullmatch(r"/api/clients/peer-[0-9a-f]{16}/config",self.path)) or
                    bool(re.fullmatch(r"/api/profiles/(?:awg3|awg2|wg)/(?:clients(?:/peer-[0-9a-f]{16}/config)?|template|server)",self.path)))
   if is_client_read and self.session_cookie() is None:self.send_error(401);return
   if is_client_read and not client_permitted():self.send_error(429);return

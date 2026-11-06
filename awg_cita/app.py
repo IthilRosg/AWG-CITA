@@ -452,6 +452,19 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/history":
             self._json(200, {"schema_version": 1, "history": self.history.records()})
             return
+        if self.path == '/api/actions' and self.lifecycle_service is not None:
+            if self._session_token() is None:
+                self._json(401, {'error_code': 'unauthorized'})
+                return
+            try:
+                if self.action_audit_log is None:
+                    raise RuntimeError('action audit unavailable')
+                result = self.action_audit_log.recent_actions()
+            except Exception:
+                self._json(503, {'error_code': 'audit_read_failed'})
+                return
+            self._json(200, result)
+            return
         template_match = _PROFILE_TEMPLATE_RE.fullmatch(self.path)
         if template_match is not None and self.lifecycle_service is not None:
             if self._session_token() is None:

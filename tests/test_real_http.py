@@ -9,7 +9,7 @@ import threading
 import unittest
 from http.client import HTTPConnection
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from awg_cita.app import AwgReader, create_server
 from awg_cita.lifecycle import FakeAwgLifecycleAdapter, LifecycleService
@@ -78,6 +78,45 @@ class CanaryHttpTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(json.loads(body)['deleted'])
         self.assertEqual(json.loads(self.request('GET', '/api/clients', headers={'Cookie': cookie})[2])['clients'], [])
+
+    def test_action_history_requires_operator_session_and_returns_safe_source(self):
+        handler = self.server.RequestHandlerClass
+        handler.require_operator_header = True
+        handler.operator_id = 'test-operator'
+        data = {'schema_version': 1, 'source': 'server_audit', 'events': [], 'truncated': False}
+        audit = Mock()
+        audit.recent_actions.return_value = data
+        handler.action_audit_log = audit
+        self.assertEqual(self.request('GET', '/api/actions')[0], 401)
+        identity = {'X-AWG-Operator': 'test-operator'}
+        self.assertEqual(self.request('GET', '/api/actions', headers=identity)[0], 401)
+        _, headers, _ = self.request('GET', '/', headers=identity)
+        trusted = {**identity, 'Cookie': headers['Set-Cookie'].split(';', 1)[0]}
+        self.assertEqual(self.request('GET', '/api/actions', headers={**trusted, 'X-AWG-Operator': 'forged'})[0], 401)
+        audit.recent_actions.assert_not_called()
+        status, headers, body = self.request('GET', '/api/actions', headers=trusted)
+        self.assertEqual(status, 200)
+        self.assertEqual(headers['Cache-Control'], 'no-store')
+        self.assertEqual(json.loads(body), data)
+        audit.recent_actions.assert_called_once_with()
+        self.assertEqual(self.request('GET', '/api/actions?limit=999', headers=trusted)[0], 404)
+        handler.sessions.clear()
+        self.assertEqual(self.request('GET', '/api/actions', headers=trusted)[0], 401)
+
+    def test_action_history_unavailable_is_generic_and_readonly_mode_is_404(self):
+        handler = self.server.RequestHandlerClass
+        _, headers, _ = self.request('GET', '/')
+        trusted = {'Cookie': headers['Set-Cookie'].split(';', 1)[0]}
+        status, _, body = self.request('GET', '/api/actions', headers=trusted)
+        self.assertEqual((status, json.loads(body)), (503, {'error_code': 'audit_read_failed'}))
+        audit = Mock()
+        audit.recent_actions.side_effect = ValueError('SYNTHETIC-PRIVATE-RAW-LINE')
+        handler.action_audit_log = audit
+        status, _, body = self.request('GET', '/api/actions', headers=trusted)
+        self.assertEqual(status, 503)
+        self.assertNotIn('SYNTHETIC', body)
+        handler.lifecycle_service = None
+        self.assertEqual(self.request('GET', '/api/actions', headers=trusted)[0], 404)
 
     def test_bad_methods_content_and_payload_fail_without_mutation(self):
         _, headers, html = self.request('GET', '/')

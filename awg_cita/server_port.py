@@ -13,11 +13,14 @@ import sys
 import time
 from pathlib import Path
 
+from .real_awg import MAX_INVENTORY_BYTES
 from .server_endpoint import BACKUPS, _fsync_directory, _write_new, read_root_settings, revision
 
 _REVISION = re.compile(r'[0-9a-f]{64}\Z')
 _ENV = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C', 'LC_ALL': 'C'}
 _UFW = '/usr/sbin/ufw'
+# One base64 server configuration plus bounded profile metadata and JSON overhead.
+_MAX_JOURNAL_BYTES = 4 * ((MAX_INVENTORY_BYTES + 2) // 3) + 8192
 
 
 def validate_request(value: object) -> tuple[str, int]:
@@ -51,6 +54,8 @@ def read_request() -> tuple[str, int]:
 
 
 def replace_config_port(raw: bytes, old: int, new: int) -> bytes:
+    if not 1 <= len(raw) <= MAX_INVENTORY_BYTES:
+        raise ValueError('server config too long')
     if type(old) is not int or type(new) is not int or not 1 <= old <= 65535 or not 1 <= new <= 65535:
         raise ValueError('invalid listen port')
     lines = raw.splitlines(keepends=True)
@@ -69,7 +74,7 @@ def replace_config_port(raw: bytes, old: int, new: int) -> bytes:
     if found != 1:
         raise ValueError('missing or duplicate listen port')
     result = b''.join(output)
-    if len(result) > 65536:
+    if len(result) > MAX_INVENTORY_BYTES:
         raise ValueError('server config too long')
     return result
 
@@ -136,6 +141,8 @@ def _secure_backup_directory() -> None:
 
 
 def _start_journal(profile: str, old: int, new: int, config: bytes, metadata: bytes) -> None:
+    if not 1 <= len(config) <= MAX_INVENTORY_BYTES:
+        raise ValueError('server config too long')
     _secure_backup_directory()
     pending = _pending_path(profile)
     if pending.exists() or pending.is_symlink():
@@ -144,6 +151,8 @@ def _start_journal(profile: str, old: int, new: int, config: bytes, metadata: by
              'config': base64.b64encode(config).decode('ascii'),
              'metadata': base64.b64encode(metadata).decode('ascii')}
     raw = (json.dumps(value, separators=(',', ':')) + '\n').encode('ascii')
+    if len(raw) > _MAX_JOURNAL_BYTES:
+        raise ValueError('port journal too long')
     temp = BACKUPS / ('.' + pending.name + '-' + str(os.getpid()))
     try:
         _write_new(temp, raw)
@@ -163,7 +172,7 @@ def recover_pending(*, profile: str, path: Path, limit: int, read_config,
     """Conservatively restore the old state after an interrupted migration."""
     pending = _pending_path(profile)
     try:
-        raw = read_root_settings(pending, 140000)
+        raw = read_root_settings(pending, _MAX_JOURNAL_BYTES)
     except FileNotFoundError:
         return False
     def unique(pairs):
@@ -182,7 +191,7 @@ def recover_pending(*, profile: str, path: Path, limit: int, read_config,
         raise ValueError('invalid port journal')
     original_config = base64.b64decode(value['config'], validate=True)
     original_metadata = base64.b64decode(value['metadata'], validate=True)
-    if not 1 <= len(original_config) <= 65536 or not 1 <= len(original_metadata) <= limit:
+    if not 1 <= len(original_config) <= MAX_INVENTORY_BYTES or not 1 <= len(original_metadata) <= limit:
         raise ValueError('invalid port journal')
     changed_config = replace_config_port(original_config, old, new)
     changed_metadata = _metadata_port(original_metadata, old, new, limit)
