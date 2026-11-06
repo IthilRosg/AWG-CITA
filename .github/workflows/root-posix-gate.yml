@@ -1,6 +1,9 @@
 name: root-posix-gate
 
 on:
+  push:
+    branches:
+      - codex/root-posix-gate-20261106
   workflow_dispatch:
 
 permissions:
