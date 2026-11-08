@@ -1,5 +1,5 @@
 """Destructive synthetic bootstrap acceptance: disposable Ubuntu systemd VM only."""
-import argparse, base64, hashlib, http.client, json, os, secrets, shutil, subprocess, sys, tempfile, time, zipfile
+import argparse, base64, hashlib, http.client, json, os, secrets, shutil, socket, subprocess, sys, tempfile, time, zipfile
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 import build
@@ -106,8 +106,20 @@ def main(work,wheel,deps,official):
     finally:install.switch=saved_switch
     unchanged();assert all(not Path('/etc/systemd/system/'+u+'.service').exists() for u in install.UNITS)
     print('PRE_SWITCH_ROLLBACK_PASS',flush=True)
+    stale={};manager=install.pwd.getpwnam('awg-manager')
+    for name,mode,group in [('app',0o600,manager.pw_gid),('relay',0o660,gid)]:
+        d=Path('/run/awg-cita-'+name);d.mkdir(mode=0o700 if name=='app' else 0o750)
+        os.chown(d,manager.pw_uid,group);os.chmod(d,0o700 if name=='app' else 0o750)
+        p=d/('backend.sock' if name=='app' else 'relay.sock')
+        with socket.socket(socket.AF_UNIX) as orphan:orphan.bind(str(p))
+        os.chown(p,manager.pw_uid,group);p.chmod(mode);stale[str(p)]=p.stat().st_ino
     # Full service-account install, real bcrypt login, and authenticated API through Caddy.
+    previous_txs=set(install.STATE.iterdir())
     install.install(bundle)
+    original_tx=next(iter(set(install.STATE.iterdir())-previous_txs))
+    out=run('runuser','-u','awg-manager','--','/usr/local/bin/awg-cita-read','show','awg-canary0','dump').stdout
+    rows=[r.split('\t') for r in out.splitlines()]
+    assert rows[0][0]==rows[0][19]==rows[1][1]=='(redacted)'
     def api(path,method='GET',body=None,cookie=None):
         conn=http.client.HTTPConnection('127.0.0.1',18080,timeout=30)
         headers={'Host':'127.0.0.1:18080','Origin':c['origin'],'Sec-Fetch-Site':'same-origin'}
@@ -145,11 +157,12 @@ def main(work,wheel,deps,official):
     install.rollback(tx);assert install.CURRENT.resolve()==old;install.verify(m);login_checks()
     assert all(p.read_bytes().startswith(b) for p,b in logdata.items());print('UPGRADE_ROLLBACK_PASS',flush=True)
     # Roll back the original clean-host transaction: no imaginary old service start.
-    first=sorted(install.STATE.iterdir(),key=lambda p:p.stat().st_mtime_ns)[0]
-    install.rollback(first)
+    install.rollback(original_tx)
     assert not os.path.lexists(install.CURRENT)
     assert all(not Path('/etc/systemd/system/'+u+'.service').exists() for u in install.UNITS)
     assert stamp(vpn)==before and all(p.exists() for p in logs) and install.sha(auth)==auth_sha
+    assert all(Path(p).stat().st_ino==inode for p,inode in stale.items())
+    print('ORPHAN_SOCKET_ROLLBACK_INODES_PASS',flush=True)
     print('CLEAN_HOST_ROLLBACK_LOGS_VPN_PRESERVED_PASS',flush=True)
     marker=json.loads((bundle/'payload'/m['release_path'].lstrip('/')/'RELEASE_MARKER').read_text())
     (work/'result.json').write_text(json.dumps(dict(result='PASS',systemd=True,fixture_awg=True,genuine_awg_readonly=True,application_commit=build.LOCK['application_commit'],deployment_commit=marker['deployment_commit']),indent=2))

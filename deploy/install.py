@@ -119,6 +119,13 @@ def preflight(bundle):
         if os.path.lexists(p) and not p.is_symlink():
             s=p.lstat()
             if not stat.S_ISSOCK(s.st_mode) or stat.S_IMODE(s.st_mode)!=mode or s.st_uid!=pwd.getpwnam('awg-manager').pw_uid:raise ValueError('unsafe existing socket')
+            with socket.socket(socket.AF_UNIX) as probe:
+                probe.settimeout(1)
+                try:probe.connect(str(p))
+                except ConnectionRefusedError:pass
+                else:
+                    unit='awg-cita' if name=='app' else 'awg-cita-rate-limit'
+                    if run('systemctl','is-active',unit,check=False).stdout.strip()!='active':raise ValueError('socket listener not managed by expected service')
     site=bundle/'payload'/m['release_path'].lstrip('/')/'site'
     code='import sys;sys.path.insert(0,sys.argv[1]);import awg_cita.cli,awg_cita.profile_helper,awg_cita.canary_helper,segno,bcrypt;assert segno.make_qr("fixture").png_data_uri().startswith("data:image/png;base64,");assert bcrypt.checkpw(b"fixture",bcrypt.hashpw(b"fixture",bcrypt.gensalt(rounds=4)))'
     run('/usr/bin/python3','-IB','-c',code,str(site))
@@ -158,6 +165,10 @@ def rollback(tx):
     s=json.loads((tx/'state.json').read_text())
     for u in reversed(UNITS):run('systemctl','disable','--now',u,check=False)
     for p,r in s['files'].items():restore(Path(p),r)
+    for path,r in s.get('runtime_directories',{}).items():
+        p=Path(path);p.mkdir(parents=True,exist_ok=True);os.chown(p,r['uid'],r['gid']);os.chmod(p,r['mode'])
+    for path,backup in s.get('stale_sockets',{}).items():
+        if Path(backup).exists():os.replace(backup,path)
     restore(CURRENT,s['current'])
     run('systemctl','daemon-reload')
     for u,old in s['units'].items():
@@ -198,7 +209,12 @@ def install(bundle):
     tx.mkdir(parents=True,mode=0o700);os.chmod(STATE,0o700)
     targets=[Path(r['destination']) for r in m['files'] if not Path(r['destination']).is_relative_to(base)]
     targets += [Path('/usr/local/bin/awg')]
-    s=dict(current=snapshot(CURRENT),files={str(p):snapshot(p) for p in targets},units={u:dict(active=run('systemctl','is-active',u,check=False).stdout.strip(),enabled=run('systemctl','is-enabled',u,check=False).stdout.strip()) for u in UNITS},created_accounts=[],created_directories=[])
+    runtime={}
+    for name in ('app','relay'):
+        p=Path('/run/awg-cita-'+name)
+        if p.exists():
+            st=p.lstat();runtime[str(p)]=dict(uid=st.st_uid,gid=st.st_gid,mode=stat.S_IMODE(st.st_mode))
+    s=dict(current=snapshot(CURRENT),files={str(p):snapshot(p) for p in targets},units={u:dict(active=run('systemctl','is-active',u,check=False).stdout.strip(),enabled=run('systemctl','is-enabled',u,check=False).stdout.strip()) for u in UNITS},created_accounts=[],created_directories=[],runtime_directories=runtime,stale_sockets={})
     save(tx,s);print('TRANSACTION',tx,flush=True)
     try:
         try:pwd.getpwnam('awg-manager')
@@ -220,6 +236,16 @@ def install(bundle):
         # Preserve pre-existing dangling links for rollback, never copy live sockets.
         for p in (Path('/run/awg-cita-app/backend.sock'),Path('/run/awg-cita-relay/relay.sock')):
             if p.is_symlink():s['files'][str(p)]=snapshot(p);save(tx,s);p.unlink()
+            elif p.exists():
+                # Only closed orphan sockets remain after stopping managed services.
+                with socket.socket(socket.AF_UNIX) as probe:
+                    probe.settimeout(1)
+                    try:probe.connect(str(p))
+                    except ConnectionRefusedError:pass
+                    else:raise ValueError('refusing to move an active socket')
+                backup=Path('/run/awg-cita-deployment-backups')/tx.name/p.name
+                directories(backup.parent);os.chmod(backup.parent.parent,0o700)
+                s['stale_sockets'][str(p)]=str(backup);save(tx,s);os.replace(p,backup)
         run('systemctl','daemon-reload')
         switch(base)
         for u in UNITS:run('systemctl','enable',u);run('systemctl','start',u)
