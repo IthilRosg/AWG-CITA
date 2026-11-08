@@ -48,3 +48,6 @@ AWG fixture. It separately executes the locked genuine AWG `--version` and
 read-only `show interfaces`; the fixture test does not prove kernel/tunnel
 compatibility. Production acceptance also requires genuine AWG read-back and
 unchanged host-specific VPN hashes/counts/peer sets.
+
+See [MAINTENANCE.md](MAINTENANCE.md) for dependency-update PRs, the pinned
+application contract, immutable releases and routine host verification.
