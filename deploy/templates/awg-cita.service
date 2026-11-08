@@ -1,0 +1,27 @@
+[Unit]
+Description=AWG CITA operator backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=awg-manager
+Group=awg-manager
+Environment=PYTHONPATH=/opt/awg-cita/current/site
+ExecStart=/usr/bin/python3 -m awg_cita.cli --binary /usr/local/bin/awg-cita-read --interface awg-canary0 --allowed-host @HOST@ --audit-log /var/lib/awg-cita-audit/status.jsonl --audit-min-interval 60 --canary-actions --operator-origin @ORIGIN@ --operator-id @OPERATOR_ID@ --action-audit-log /var/lib/awg-cita-audit/actions.jsonl
+RuntimeDirectory=awg-cita-app
+RuntimeDirectoryMode=0700
+Restart=on-failure
+RestartSec=5
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/etc/amnezia/amneziawg /etc/awg-cita/client-templates /etc/awg-cita/profiles
+ProtectKernelTunables=true
+ProtectControlGroups=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,20 @@
+#!/usr/bin/python3 -I
+"""Fixed AWG read gate; retain DE-2's secret-redacting boundary."""
+import subprocess
+import sys
+if len(sys.argv) != 1:
+    raise SystemExit(64)
+r = subprocess.run(['@AWG_BINARY@', 'show', 'awg-canary0', 'dump'], capture_output=True, timeout=5)
+if r.returncode or r.stderr or len(r.stdout) > 65536:
+    raise SystemExit(1)
+try:
+    rows = [line.split('\t') for line in r.stdout.decode('ascii').splitlines()]
+    if not rows or len(rows[0]) != 29 or any(len(row) != 8 for row in rows[1:]):
+        raise ValueError('unsupported dump schema')
+    for index in (0, 19):
+        rows[0][index] = '(redacted)'
+    for row in rows[1:]:
+        row[1] = '(redacted)'
+except (ValueError, UnicodeError):
+    raise SystemExit(1) from None
+sys.stdout.write('\n'.join('\t'.join(row) for row in rows) + '\n')

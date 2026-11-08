@@ -1,0 +1,49 @@
+name: deployment-clean-host
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['codex/deployment-bundle-*']
+  pull_request:
+    paths: ['deploy/**', 'awg_cita/**', 'scripts/**', 'pyproject.toml', '.github/workflows/deployment.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  ubuntu-systemd:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Assert immutable application source
+        run: git diff --exit-code d8d5257461cc31d9ef715396fba01fc7d11660dd -- awg_cita pyproject.toml scripts/rate_limit_proxy.py scripts/operator_auth.py scripts/awg-cita-peer scripts/awg-cita-profile scripts/awg-cita-template scripts/awg-cita-canary.sudoers scripts/awg-cita-profiles.sudoers scripts/awg-cita-templates.sudoers
+      - name: Prepare separate Ubuntu systemd runner
+        run: |
+          test "$(cat /proc/1/comm)" = systemd
+          sudo apt-get update -qq
+          sudo apt-get install -y python3.12-venv caddy sudo
+          python3 -m venv /tmp/awg-build
+          /tmp/awg-build/bin/pip install -r deploy/build-requirements.lock
+      - name: Reproduce exact approved application wheel
+        run: /tmp/awg-build/bin/python deploy/rebuild_application.py /tmp/awg-wheel
+      - name: Download locked offline dependencies and genuine AWG artifact
+        run: |
+          /tmp/awg-build/bin/pip download --require-hashes --only-binary=:all: --platform manylinux_2_28_x86_64 --python-version 312 --implementation cp --abi abi3 -r deploy/requirements.lock --dest /tmp/awg-deps
+          curl -fL --retry 2 https://github.com/amnezia-vpn/amneziawg-tools/releases/download/v3.1.20260812/ubuntu-22.04-amneziawg-tools.zip -o /tmp/official-awg.zip
+      - name: Install, authenticate as operator, verify service-user rights, repeat and rollback
+        run: |
+          sudo env AWG_CITA_DISPOSABLE_VM=1 python3 deploy/test_systemd.py --work /opt/awg-cita-ci-evidence --wheel /tmp/awg-wheel/awg_cita-0.2.0-py3-none-any.whl --dependencies /tmp/awg-deps --official-awg /tmp/official-awg.zip
+      - name: Upload synthetic bundle manifests and test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: deployment-systemd-evidence
+          path: |
+            /opt/awg-cita-ci-evidence/result.json
+            /opt/awg-cita-ci-evidence/bundle/manifest.json
+            /opt/awg-cita-ci-evidence/bundle/SHA256SUMS
+            /tmp/awg-wheel/*.whl
+          if-no-files-found: warn
