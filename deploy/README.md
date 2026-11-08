@@ -19,6 +19,10 @@ verify each field against the destination host, and never copy a production
 credential into Git. The immutable application supports the listed interface
 and profile paths only; other mappings fail closed before installation.
 This limitation is explicit rather than silently substituting host values.
+Unit names are explicit too: the standard backend/relay pair or the existing
+`awg-cita-app`/`awg-cita-relay` pair. Existing journal paths under
+`/var/log/awg-cita` can be retained rather than silently starting a new history.
+Both schemes have separate clean-host systemd CI jobs.
 
 Run `sudo python3 install.py preflight BUNDLE`, then `install BUNDLE`.
 Preflight does not write to the host. Installation snapshots original files,

@@ -1,7 +1,7 @@
 [Unit]
 Description=AWG CITA operator relay
-After=network-online.target awg-cita.service
-Requires=awg-cita.service
+After=network-online.target @BACKEND_UNIT@.service
+Requires=@BACKEND_UNIT@.service
 
 [Service]
 Type=simple

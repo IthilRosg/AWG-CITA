@@ -4,10 +4,12 @@ import shutil, socket, stat, subprocess, sys, tempfile, time
 from pathlib import Path
 
 UNITS=('awg-cita','awg-cita-rate-limit')
+PAIRS=(UNITS,('awg-cita-app','awg-cita-relay'))
 CURRENT=Path('/opt/awg-cita/current')
 STATE=Path('/var/backups/awg-cita-deployment')
 FIXED={
  '/etc/systemd/system/awg-cita.service','/etc/systemd/system/awg-cita-rate-limit.service',
+ '/etc/systemd/system/awg-cita-app.service','/etc/systemd/system/awg-cita-relay.service',
  '/etc/systemd/system/caddy.service.d/awg-cita-relay.conf',
  '/usr/local/bin/awg-cita-read','/usr/local/sbin/awg-manager-read',
  '/usr/local/sbin/awg-cita-peer','/usr/local/sbin/awg-cita-profile','/usr/local/sbin/awg-cita-template',
@@ -19,6 +21,11 @@ def run(*args, check=True, **kw):
     return subprocess.run(args,check=check,capture_output=True,text=True,timeout=60,**kw)
 
 def sha(p): return hashlib.sha256(p.read_bytes()).hexdigest()
+
+def units(m):
+    result=(m['host']['units']['backend'],m['host']['units']['relay'])
+    if result not in PAIRS:raise ValueError('unsupported unit mapping')
+    return result
 
 def safe_parents(p):
     for q in [p,*p.parents]:
@@ -92,7 +99,7 @@ def preflight(bundle):
         p=Path(r['destination']);safe_parents(p)
         if p.exists() and not p.is_file():raise ValueError('destination conflict')
         if p.is_file() and p.is_relative_to(m['release_path']) and sha(p)!=r['sha256']:raise ValueError('immutable release conflict')
-    for u in UNITS:
+    for u in units(m):
         if list(Path('/etc/systemd/system/'+u+'.service.d').glob('*.conf')):raise ValueError('existing service drop-ins require separate reconciliation')
     if os.path.lexists(CURRENT) and not CURRENT.is_symlink():raise ValueError('current must be a symlink')
     link=Path('/usr/local/bin/awg')
@@ -124,7 +131,7 @@ def preflight(bundle):
                 try:probe.connect(str(p))
                 except ConnectionRefusedError:pass
                 else:
-                    unit='awg-cita' if name=='app' else 'awg-cita-rate-limit'
+                    unit=units(m)[0 if name=='app' else 1]
                     if run('systemctl','is-active',unit,check=False).stdout.strip()!='active':raise ValueError('socket listener not managed by expected service')
     site=bundle/'payload'/m['release_path'].lstrip('/')/'site'
     code='import sys;sys.path.insert(0,sys.argv[1]);import awg_cita.cli,awg_cita.profile_helper,awg_cita.canary_helper,segno,bcrypt;assert segno.make_qr("fixture").png_data_uri().startswith("data:image/png;base64,");assert bcrypt.checkpw(b"fixture",bcrypt.hashpw(b"fixture",bcrypt.gensalt(rounds=4)))'
@@ -163,7 +170,9 @@ def wait_sockets():
 
 def rollback(tx):
     s=json.loads((tx/'state.json').read_text())
-    for u in reversed(UNITS):run('systemctl','disable','--now',u,check=False)
+    old_units=tuple(s['units'])
+    if set(old_units) not in [set(p) for p in PAIRS]:raise ValueError('rollback unit scope')
+    for u in reversed(old_units):run('systemctl','disable','--now',u,check=False)
     for p,r in s['files'].items():restore(Path(p),r)
     for path,r in s.get('runtime_directories',{}).items():
         p=Path(path);p.mkdir(parents=True,exist_ok=True);os.chown(p,r['uid'],r['gid']);os.chmod(p,r['mode'])
@@ -182,7 +191,7 @@ def verify(m):
     for r in m['files']:
         p=Path(r['destination']);s=p.lstat()
         if not stat.S_ISREG(s.st_mode) or s.st_uid or s.st_gid or stat.S_IMODE(s.st_mode)!=r['mode'] or sha(p)!=r['sha256']:raise ValueError('installed manifest drift: '+str(p))
-    for u in UNITS:
+    for u in units(m):
         if run('systemctl','is-active',u).stdout.strip()!='active':raise ValueError('service inactive')
         if run('systemctl','is-enabled',u).stdout.strip()!='enabled':raise ValueError('service not enabled')
     uid=pwd.getpwnam('awg-manager').pw_uid
@@ -214,7 +223,7 @@ def install(bundle):
         p=Path('/run/awg-cita-'+name)
         if p.exists():
             st=p.lstat();runtime[str(p)]=dict(uid=st.st_uid,gid=st.st_gid,mode=stat.S_IMODE(st.st_mode))
-    s=dict(current=snapshot(CURRENT),files={str(p):snapshot(p) for p in targets},units={u:dict(active=run('systemctl','is-active',u,check=False).stdout.strip(),enabled=run('systemctl','is-enabled',u,check=False).stdout.strip()) for u in UNITS},created_accounts=[],created_directories=[],runtime_directories=runtime,stale_sockets={})
+    s=dict(current=snapshot(CURRENT),files={str(p):snapshot(p) for p in targets},units={u:dict(active=run('systemctl','is-active',u,check=False).stdout.strip(),enabled=run('systemctl','is-enabled',u,check=False).stdout.strip()) for u in units(m)},created_accounts=[],created_directories=[],runtime_directories=runtime,stale_sockets={})
     save(tx,s);print('TRANSACTION',tx,flush=True)
     try:
         try:pwd.getpwnam('awg-manager')
@@ -227,12 +236,12 @@ def install(bundle):
         link=Path('/usr/local/bin/awg')
         if not os.path.lexists(link):link.symlink_to(m['host']['awg_binary'])
         manager=pwd.getpwnam('awg-manager')
-        for name in ('/var/lib/awg-cita-audit',):
+        for name in (str(Path(m['host']['action_audit']).parent),):
             p=Path(name)
             if not p.exists():p.mkdir(mode=0o700,parents=True);os.chown(p,manager.pw_uid,manager.pw_gid);s['created_directories'].append(name);save(tx,s)
             info=p.lstat()
             if not stat.S_ISDIR(info.st_mode) or info.st_uid!=manager.pw_uid or stat.S_IMODE(info.st_mode)!=0o700:raise ValueError('unsafe audit directory')
-        for u in reversed(UNITS):run('systemctl','stop',u,check=False)
+        for u in reversed(units(m)):run('systemctl','stop',u,check=False)
         # Preserve pre-existing dangling links for rollback, never copy live sockets.
         for p in (Path('/run/awg-cita-app/backend.sock'),Path('/run/awg-cita-relay/relay.sock')):
             if p.is_symlink():s['files'][str(p)]=snapshot(p);save(tx,s);p.unlink()
@@ -248,7 +257,7 @@ def install(bundle):
                 s['stale_sockets'][str(p)]=str(backup);save(tx,s);os.replace(p,backup)
         run('systemctl','daemon-reload')
         switch(base)
-        for u in UNITS:run('systemctl','enable',u);run('systemctl','start',u)
+        for u in units(m):run('systemctl','enable',u);run('systemctl','start',u)
         wait_sockets()
         verify(m);s['completed']=True;save(tx,s)
         print('INSTALL_OK',m['release'])

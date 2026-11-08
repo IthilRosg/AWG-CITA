@@ -49,6 +49,9 @@ def main(work,wheel,deps,official):
     gid=install.grp.getgrnam('awg-cita-relay').gr_gid
     # Credentials and Caddy are prerequisites, not installer-owned files.
     c=dict(build.validate({**json.loads((build.HERE/'host.example.json').read_text()),'awg_binary':str(fixture),'awg_sha256':install.sha(fixture),'auth_file':'/etc/awg-cita-operator-auth/hash'}))
+    if os.environ.get('AWG_CITA_UNIT_SCHEME')=='legacy':
+        c.update(units={'backend':'awg-cita-app','relay':'awg-cita-relay'},status_audit='/var/log/awg-cita/evidence.jsonl',action_audit='/var/log/awg-cita/actions.jsonl')
+    unit_names=install.units({'host':c})
     cp=work/'host.json';cp.write_text(json.dumps(c))
     bundle=work/'bundle';m=build.build(cp,wheel,deps,bundle)
     site=bundle/'payload'/m['release_path'].lstrip('/')/'site'
@@ -89,7 +92,7 @@ def main(work,wheel,deps,official):
         except ValueError:pass
     finally:hp.write_bytes(hraw)
     unchanged();print('HELPER_GATE_PASS',flush=True)
-    bad_payload_gate('/etc/systemd/system/awg-cita.service',b'[Service]\nExecStart=/missing-fixture-executable\n','UNIT_GATE')
+    bad_payload_gate('/etc/systemd/system/'+unit_names[0]+'.service',b'[Service]\nExecStart=/missing-fixture-executable\n','UNIT_GATE')
     # An unsafe pre-existing socket object must fail before the initial switch.
     sp=Path('/run/awg-cita-app/backend.sock');sp.parent.mkdir(parents=True,exist_ok=True);put(sp,b'wrong object',0o666)
     try:
@@ -104,7 +107,7 @@ def main(work,wheel,deps,official):
         try:install.install(bundle);raise AssertionError('switch fault ignored')
         except RuntimeError:pass
     finally:install.switch=saved_switch
-    unchanged();assert all(not Path('/etc/systemd/system/'+u+'.service').exists() for u in install.UNITS)
+    unchanged();assert all(not Path('/etc/systemd/system/'+u+'.service').exists() for u in unit_names)
     print('PRE_SWITCH_ROLLBACK_PASS',flush=True)
     stale={};manager=install.pwd.getpwnam('awg-manager')
     for name,mode,group in [('app',0o600,manager.pw_gid),('relay',0o660,gid)]:
@@ -144,7 +147,7 @@ def main(work,wheel,deps,official):
     r=subprocess.run(['runuser','-u','awg-manager','--','sudo','-n','/usr/local/sbin/awg-manager-read','unexpected'],capture_output=True)
     assert r.returncode!=0
     install.install(bundle);login_checks();print('IDEMPOTENT_INSTALL_PASS',flush=True)
-    run('systemctl','restart',*install.UNITS)
+    run('systemctl','restart',*unit_names)
     for _ in range(60):
         if Path('/run/awg-cita-relay/relay.sock').exists():break
         time.sleep(.5)
@@ -153,13 +156,13 @@ def main(work,wheel,deps,official):
     c2=dict(c,origin='https://panel.example.test:9444');cp.write_text(json.dumps(c2));second=work/'bundle-update';m2=build.build(cp,wheel,deps,second)
     old=install.CURRENT.resolve();install.install(second);assert install.CURRENT.resolve()!=old
     tx=sorted(install.STATE.iterdir(),key=lambda p:p.stat().st_mtime_ns)[-1]
-    logs=list(Path('/var/lib/awg-cita-audit').glob('*.jsonl'));logdata={p:p.read_bytes() for p in logs}
+    logs=list(Path(c['action_audit']).parent.glob('*.jsonl'));logdata={p:p.read_bytes() for p in logs}
     install.rollback(tx);assert install.CURRENT.resolve()==old;install.verify(m);login_checks()
     assert all(p.read_bytes().startswith(b) for p,b in logdata.items());print('UPGRADE_ROLLBACK_PASS',flush=True)
     # Roll back the original clean-host transaction: no imaginary old service start.
     install.rollback(original_tx)
     assert not os.path.lexists(install.CURRENT)
-    assert all(not Path('/etc/systemd/system/'+u+'.service').exists() for u in install.UNITS)
+    assert all(not Path('/etc/systemd/system/'+u+'.service').exists() for u in unit_names)
     assert stamp(vpn)==before and all(p.exists() for p in logs) and install.sha(auth)==auth_sha
     assert all(Path(p).stat().st_ino==inode for p,inode in stale.items())
     print('ORPHAN_SOCKET_ROLLBACK_INODES_PASS',flush=True)

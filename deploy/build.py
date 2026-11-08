@@ -11,13 +11,17 @@ DEPENDENCIES = {
 }
 
 def validate(c):
-    fields = {'host','origin','operator_id','auth_file','awg_binary','awg_sha256','awg_version','interfaces','config_root','profile_root'}
+    fields = {'host','origin','operator_id','auth_file','awg_binary','awg_sha256','awg_version','interfaces','config_root','profile_root','units','status_audit','action_audit'}
     if set(c) != fields: raise ValueError('host schema mismatch')
     if not re.fullmatch(r'[a-z0-9]+(?:[.-][a-z0-9]+)*',c['host']): raise ValueError('invalid host')
     u=urlsplit(c['origin'])
     if u.scheme!='https' or u.hostname!=c['host'] or u.path or u.query or u.fragment or u.username or u.password or u.netloc.endswith(':'): raise ValueError('invalid origin')
     if u.port is not None and not 1<=u.port<=65535: raise ValueError('invalid port')
     if not re.fullmatch(r'[A-Za-z0-9_.@-]{1,64}',c['operator_id']): raise ValueError('invalid identity')
+    if c['units'] not in ({'backend':'awg-cita','relay':'awg-cita-rate-limit'},{'backend':'awg-cita-app','relay':'awg-cita-relay'}):raise ValueError('unsupported unit mapping')
+    auditpaths=[Path(c[k]) for k in ('status_audit','action_audit')]
+    if auditpaths[0]==auditpaths[1] or auditpaths[0].parent!=auditpaths[1].parent:raise ValueError('audit files must be separate and share a directory')
+    if str(auditpaths[0].parent) not in ('/var/lib/awg-cita-audit','/var/log/awg-cita') or any(not re.fullmatch(r'[a-z-]+\.jsonl',p.name) for p in auditpaths):raise ValueError('unsafe audit path')
     for k in ('auth_file','awg_binary'):
         if not re.fullmatch(r'/[A-Za-z0-9_./-]+',c[k]) or '..' in Path(c[k]).parts: raise ValueError('unsafe path')
     if not re.fullmatch('[a-f0-9]{64}',c['awg_sha256']): raise ValueError('unverified AWG SHA')
@@ -62,10 +66,10 @@ def build(config, wheel, dependencies, out):
     add(base+'/DEPLOYMENT_HOST.json',(json.dumps(c,sort_keys=True,indent=2)+'\n').encode(),section='host-specific prerequisites')
     marker={'application_commit':LOCK['application_commit'],'application_wheel_sha256':LOCK['application_wheel_sha256'],'deployment_commit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=HERE.parent,text=True).strip(),'release':release}
     add(base+'/RELEASE_MARKER',(json.dumps(marker,sort_keys=True)+'\n').encode())
-    replacements={'HOST':c['host'],'ORIGIN':c['origin'],'OPERATOR_ID':c['operator_id'],'AUTH_FILE':c['auth_file'],'AWG_BINARY':c['awg_binary']}
+    replacements={'HOST':c['host'],'ORIGIN':c['origin'],'OPERATOR_ID':c['operator_id'],'AUTH_FILE':c['auth_file'],'AWG_BINARY':c['awg_binary'],'BACKEND_UNIT':c['units']['backend'],'STATUS_AUDIT':c['status_audit'],'ACTION_AUDIT':c['action_audit']}
     for name,dest,mode,section in [
-      ('awg-cita.service','/etc/systemd/system/awg-cita.service',0o644,'systemd deployment'),
-      ('awg-cita-rate-limit.service','/etc/systemd/system/awg-cita-rate-limit.service',0o644,'systemd deployment'),
+      ('awg-cita.service','/etc/systemd/system/'+c['units']['backend']+'.service',0o644,'systemd deployment'),
+      ('awg-cita-rate-limit.service','/etc/systemd/system/'+c['units']['relay']+'.service',0o644,'systemd deployment'),
       ('awg-cita-read','/usr/local/bin/awg-cita-read',0o755,'privileged helper runtime'),
       ('awg-manager-read','/usr/local/sbin/awg-manager-read',0o755,'privileged helper runtime'),
       ('awg-manager.sudoers','/etc/sudoers.d/awg-manager',0o440,'privileged helper runtime'),
