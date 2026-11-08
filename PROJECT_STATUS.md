@@ -95,52 +95,42 @@ DEPLOYED_AND_VERIFIED
 - Disposable canary mutation was not run because it requires separate approval.
 - No VPN, client, firewall, NAT, route, DNS or operator-auth changes were made.
 
-## DE-2 preflight and SSH diagnosis 2026-11-07
+## Deployment bundle и DE-2 — итог 2026-11-08
 
-- Host `DE2_ADDRESS` identifies as `DE-2`.
-- `/opt/awg-cita/current` points to `/opt/awg-cita/releases/564b0281`, which is the parent runtime, not `d8d5257-runtime-20261106`.
-- `awg-cita.service` and `awg-cita-rate-limit.service` are absent from systemd. Both commands report `inactive`, and their journal has no entries.
-- `/run/awg-cita-relay/relay.sock` and `/run/awg-cita-app/backend.sock` are dangling symlinks. Caddy is configured to proxy the panel to the relay socket, so the panel backend is unavailable. This explains the DE-2 panel error and the missing journal API.
-- Caddy is listening on ports 80 and 443. `sshd` is listening on `0.0.0.0:22` and `[::]:22`.
-- The new SSH key is present once in `/root/.ssh/authorized_keys`. The directory is `root:root` mode `700`, and the file is `root:root` mode `600`.
-- Windows routes the DE-2 address through VPNUS. The earlier `WinError 10013` was observed in a network-restricted process and does not establish a VPNUS/WFP fault. On 2026-11-08 the pinned DE-2 SSH handshake succeeded outside those process restrictions, but public-key authentication was rejected. No DE-2 network/root-cause attribution is made from the earlier failure.
-- No VPN, client, firewall, NAT, route, DNS or operator-auth changes were made during this diagnosis.
+**Deployment bundle: `DEPLOYMENT_BUNDLE_READY`. DE-2: `DEPLOYED_AND_VERIFIED`.**
 
-## DE-2 bootstrap compatibility gate 2026-11-07
+- Приложение неизменно: `d8d5257461cc31d9ef715396fba01fc7d11660dd`.
+- Проверенная и установленная deployment-ревизия: `fe8682434f22c230f897aca1124d8b5aa83f6e24`, ветка `codex/deployment-bundle-20261108`. Последующие изменения этого статуса относятся только к документации.
+- В репозиторий включены проверенные шаблоны units, read/helpers, узкие sudoers, установщик/preflight/verify/rollback, dependency locks, сборка manifest и clean-host systemd CI. Неизвестные host binaries, секреты, журналы и VPN-конфиги не публиковались.
+- Новый manifest v2 сформирован отдельно; прежний application-only manifest сохранён. 72 runtime-файла, SHA256 manifest `1d8aaa0130e04517fe5b4121a3bf1211c614a12f81b42af63390d45ac4758ccc`. Локальный комплект: `artifacts/deployment-fe86824/de2-bundle/`.
+- Clean-host Ubuntu 24.04/systemd CI прошёл для обеих схем units, standard и legacy: https://github.com/IthilRosg/AWG-CITA/actions/runs/42462326024 . Полные Python/browser/public-safety проверки той же ревизии прошли: https://github.com/IthilRosg/AWG-CITA/actions/runs/42462326028 .
+- CI проверяет настоящий bcrypt-вход через Caddy, права сервисного пользователя, helpers, authenticated API, повторную установку, sockets, сохранение файлов и rollback до/после current. AWG fixture отделён от проверки настоящего upstream binary; kernel/tunnel bootstrap не заявляется.
+- Опубликован закреплённый пакет offline wheels: https://github.com/IthilRosg/AWG-CITA/releases/tag/panel-deployment-fe86824 . Это приложение и две Python-зависимости; AWG, host-конфиг и секреты туда не входят.
 
-- Read-only baseline оформлен в `reports/AWG-CITA_DE2_bootstrap_preflight_2026-11-07.md`.
-- DE-2 остаётся на `/opt/awg-cita/releases/564b0281`; target `d8d5257-runtime-20261106` не установлен.
-- На DE-2 отсутствуют `awg-cita.service`, `awg-cita-rate-limit.service`, рабочие backend/relay listeners и обязательные wrapper/helper-пути `/usr/local/bin/awg-cita-read`, `/usr/local/bin/awg`, `/usr/local/sbin/awg-manager-read`, `/usr/local/sbin/awg-cita-peer`, `/usr/local/sbin/awg-cita-profile`.
-- `python3` доступен, но системные `pip` и `wheel` отсутствуют; одного versioned AWG binary недостаточно для проверенной схемы SE1.
-- Выкладка, переключение symlink, daemon-reload и перезапуски на DE-2 не выполнялись. VPN, клиенты, firewall, NAT, маршруты, DNS, SSH и operator auth не изменялись.
-- Rollback не потребовался; текущий release `564b0281` сохранён.
-- Post-install проверки DE-2 не выполнены, потому что bootstrap остановлен до первой production-записи.
+### Исправление прежнего inventory DE-2
 
-### Статус DE-2
+Прежние утверждения об отсутствии всей панели и dangling sockets отозваны. До установки действовали `awg-cita-app.service` и `awg-cita-relay.service`, рабочие Unix sockets и большинство helpers. Отсутствовал `awg-cita-read`. Совместимость проверена по фактической legacy-схеме; она сохранена. До установки current указывал на `564b0281`, а не на runtime SE1. UI содержит 2/7/1 клиента, live peers 2/6/1: один AWG2-клиент отключён.
 
-`DE2_BLOCKED`
+### Установка и live acceptance DE-2
 
-Разблокировка требует подтверждённого bootstrap helper-команд с SHA/владельцами, затем отдельного rollback bundle и повторного полного preflight. SE1 не изменён.
+- После preflight и проверки SHA комплект установлен через root VNC. Current: `/opt/awg-cita/releases/d8d5257-runtime-20261106-deploy-8e33e208bfb8`. Предыдущий release `564b0281` сохранён.
+- Перезапущена только фактическая пара веб-служб `awg-cita-app`/`awg-cita-relay`; обе active и enabled. Сокеты созданы службами, их владельцы и права проверены. Caddy active, его конфигурация побайтно прежняя, restart/reload Caddy не выполнялся.
+- Пользователь вошёл прежними реквизитами. GET / и authenticated GET /api/actions успешны. `source=server_audit`, 96 событий, 48 INTENT и 48 RESULT, `truncated=false`. Поля строго: actor, checked_at, client_id, correlation_id, operation, phase, result. nonce_digest и секретные маркеры отсутствуют.
+- Списки UI: AWG3 2, AWG2 7 (один отключён), WireGuard 1. SHA VPN-файлов, профилей, девяти сохранённых клиентских конфигов и auth-файла совпали с исходными; live peer sets совпали. Оба журнала сохраняют прежние байты как префикс.
+- Для DE-2 сохранена отдельная transaction backup в `/var/backups/awg-cita-deployment/`; точный путь и команда отката приведены в локальном итоговом отчёте. Production rollback не потребовался; сценарии проверены в изолированном CI. Журналы при откате сохраняются.
+- VPN, клиенты, firewall, NAT, маршруты, DNS, SSH и операторские реквизиты не изменялись. Rescue/canary mutation не выполнялась.
 
-## Deployment bundle inventory 2026-11-07
+### SE1 и сетевой диагноз
 
-- Отчёт сохранён в `reports/AWG-CITA_deployment_bundle_inventory_2026-11-07.md`.
-- Историческое состояние на 2026-11-07: live inventory не был завершён из-за `WinError 10013` ограниченного процесса. Обновление 2026-11-08: SSH к SE1 через VPNUS работает, inventory получен; причина не была доказана как VPNUS/WFP.
-- В репозитории есть tracked AWG-CITA scripts и application runtime, но отсутствуют исходники/manifest для `awg-cita-read`, `awg-manager-read`, systemd units, Caddy drop-in и внешнего AWG binary.
-- Исторические `.ops-tmp`-скрипты не считаются текущим production inventory и не добавлялись в bundle.
-- Отдельная Git-ветка не создана: локальный `.git` вернул `Permission denied` при создании ref.
-- Clean-host bootstrap не запускался; DE-2 и SE1 не изменялись.
+- SE1 использован только для чтения. Свежая итоговая проверка: прежний `d8d5257-runtime-20261106`, обе веб-службы active, GET / и authenticated /api/actions 200, 108 событий, truncated=false, nonce_digest отсутствует. Клиенты 6/12/124.
+- SSH к SE1 работает через включённый VPNUS с закреплённой идентичностью. Прежняя атрибуция WinError 10013 VPNUS/WFP отозвана: для SE1 подтверждено ограничение процесса выполнения. Временный Windows /32 маршрут удалён, VPNUS остаётся включённым.
+- DE-2 SSH handshake вне ограничения процесса успешен, но проверенные ключи отвергнуты. Причина прежнего отказа не объявляется установленной; SSH не изменялся и не являлся каналом установки.
 
-### Deployment bundle status
+### Ограничения и следующий этап
 
-`BLOCKED`
+- Действующий AWG оставлен на месте с host-specific SHA и проверкой версии/read-back. Его сборка не приписывается upstream prebuilt, поскольку SHA различаются. Для распространяемого внешнего artifact закреплены официальный source/tag/commit, license и SHA.
+- Для нового хоста существующие VPN-профили, совместимый AWG, Caddy/origin/group access и реквизиты — явные prerequisites. Установщик не является установщиком VPN или провайдером credentials.
+- Сквозное VPN-подключение, DNS/IPv6/kill-switch, мутации клиентов и production canary здесь не проверялись. Root/POSIX и failure-latch приложения подтверждены ранее; новый clean-host gate подтверждает deployment.
+- Подробный локальный отчёт: `reports/AWG-CITA_deployment_DE2_result_2026-11-08.md`; manifest по каждому файлу — `reports/AWG-CITA_deployment_manifest_v2_DE2_2026-11-08.md`.
 
-## SE1 SSH и live inventory — 2026-11-08
-
-- SSH к `SE1_ADDRESS` успешно работает через включённый VPNUS с source address `VPNUS_SOURCE`; закреплённый fingerprint совпал, авторизация существующим ключом успешна.
-- Прежняя атрибуция `WinError 10013` фильтру VPNUS/WFP отозвана: та же команда работает вне сетевых ограничений процесса выполнения. Для SE1 доказана проблема ограниченного процесса, а не VPNUS. Причина прежних ошибок DE-2 этим не установлена.
-- Разрешённый временный Windows `/32` route проверен и удалён; дополнительного маршрута не осталось. VPNUS продолжает работать. Серверные изменения не выполнялись.
-- Получены live размеры, SHA256, owner/group/mode units, helpers, drop-ins, sudoers, runtime и sockets. Исходники пяти helper/wrapper-команд прочитаны без извлечения secrets/client configs.
-- SE1: Ubuntu 24.04.4 x86_64; Python 3.12.3; segno 1.6.6; bcrypt 3.2.2; обе веб-службы и Caddy active/running; current — `d8d5257-runtime-20261106`.
-- AWG binary SHA256 `a604430b4b85e1cfb2e5a9fbd3ca0219e5cd1a0a0173243c0a4201332b522d28`; `--version` сообщает `v3.1.20260812`, каталог называется `3.1.20260828`. Upstream/source/license/build origin ещё требуется проверить.
-- Новый отчёт: `reports/AWG-CITA_SE1_live_inventory_2026-11-08.md`. Вывод о недоступности SE1 в предыдущем отчёте устарел. Bundle остаётся `BLOCKED` до provenance и clean-host проверки; DE-2 не изменён.
+Оставшихся блокеров согласованного deployment-этапа нет. Следующие изменения приложения требуют отдельного scope; текущая задача завершена работающей и проверенной панелью DE-2.
