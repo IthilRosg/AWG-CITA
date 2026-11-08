@@ -14,7 +14,57 @@
   const PREVIEW_ID_PATTERN = /^preview-[A-Za-z0-9_-]{1,64}$/;
   const CONFIG_PREVIEW_ID_PATTERN = /^config-preview-[A-Za-z0-9_-]{1,96}$/;
   const EXPIRATION_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-  const MAX_CLIENT_RECORDS = 64;
+  const MAX_CLIENT_RECORDS = 256;
+  const SECRET_LIFETIME_MS = 120000;
+  const REQUEST_TIMEOUT_MS = 45000;
+  // Allow the helper's 300s operation and the relay's 330s deadline to finish.
+  const MUTATION_TIMEOUT_MS = 340000;
+  let secretTimer = null;
+  let secretGeneration = 0;
+  let sessionExpired = false;
+
+  function clearPrivateViews() {
+    secretGeneration += 1;
+    window.clearTimeout(secretTimer);
+    activeConfigPreviewRequest = null;
+    state.configPreview = { open: false, clientId: null, tab: 'overview', loading: false, saving: false, error: '', result: null };
+    resetCreatePreview();
+    render();
+  }
+
+  function armSecretExpiry() {
+    window.clearTimeout(secretTimer);
+    secretTimer = window.setTimeout(() => {
+      clearPrivateViews();
+      showToast(state.locale === 'ru' ? 'Конфигурация скрыта через 2 минуты. Откройте её снова при необходимости.' : 'Configuration hidden after 2 minutes. Open it again when needed.', 'success');
+    }, SECRET_LIFETIME_MS);
+  }
+
+  function expireSession() {
+    sessionExpired = true;
+    clearPrivateViews();
+    const notice = $('session-expired');
+    notice.hidden = false;
+    notice.querySelector('span').textContent = state.locale === 'ru' ? 'Сессия истекла. Войдите снова; конфигурации скрыты.' : 'Session expired. Sign in again; configurations have been hidden.';
+  }
+
+  function renderConfigurationSafety(id, text) {
+    const node = $(id);
+    if (!node) return;
+    node.hidden = !realCanary || !text;
+    node.replaceChildren();
+    if (node.hidden) return;
+    const ru = state.locale === 'ru';
+    const routes = (text.match(/^AllowedIPs\s*=\s*(.+)$/m)?.[1] || '').split(',').map(value => value.trim());
+    const summary = document.createElement('summary');
+    summary.textContent = ru ? 'Проверка подключения и защиты' : 'Connection and privacy checks';
+    node.appendChild(summary);
+    const notes = [ru ? 'После изменения скачайте файл и импортируйте его на устройстве заново. Сохранённые там настройки автоматически не обновляются.' : 'After changes, download and import the file again. Settings already saved on devices do not update automatically.'];
+    if (!routes.some(route => route.includes(':'))) notes.push(ru ? 'IPv6 не включён в маршруты этого конфига. Если IPv6 доступен на устройстве, проверьте его блокировку VPN-клиентом.' : 'This configuration has no IPv6 routes. If the device has IPv6, verify that the VPN client blocks it.');
+    else notes.push(ru ? 'IPv6-маршруты заданы, но доступ в интернет и отсутствие обхода туннеля нужно проверить на устройстве.' : 'IPv6 routes are configured; internet access and tunnel bypass still need testing on the device.');
+    notes.push(ru ? 'Проверьте DNS и защиту при обрыве VPN в клиенте. Панель не может подтвердить их по конфигурации.' : 'Check DNS and VPN disconnect protection in the client. The panel cannot verify them from a configuration.');
+    for (const note of notes) { const p = document.createElement('p'); p.textContent = note; node.appendChild(p); }
+  }
   const MAX_NOTES_LENGTH = 240;
 
   const translations = {
@@ -761,7 +811,12 @@
     constructor() { super(); this.profile = 'awg3'; }
     basePath() { return this.profile === 'awg3' ? '/api/clients' : `/api/profiles/${this.profile}/clients`; }
     async request(path, body) {
+      if (sessionExpired) throw new Error('session_expired');
+      const controller = new AbortController();
+      const deadline = window.setTimeout(() => controller.abort(), body === undefined ? REQUEST_TIMEOUT_MS : MUTATION_TIMEOUT_MS);
+      try {
       const response = await fetch(path, {
+        signal: controller.signal,
         method: body === undefined ? 'GET' : 'POST',
         credentials: 'same-origin',
         cache: 'no-store',
@@ -771,9 +826,15 @@
         },
         body: body === undefined ? undefined : JSON.stringify(body)
       });
-      const result = await response.json();
+      if (response.status === 401 || (response.redirected && new URL(response.url).pathname === '/login')) {
+        expireSession();
+        throw new Error('session_expired');
+      }
+      const result = await response.json().catch(() => null);
       if (!response.ok) throw new Error(result?.error_code || 'canary_request_failed');
+      if (!result) throw new Error('invalid_server_response');
       return result;
+      } finally { window.clearTimeout(deadline); }
     }
 
     async listClients() {
@@ -789,7 +850,22 @@
     async refreshStatus() { return this.listClients(); }
 
     async listObservability() {
-      return { schemaVersion: 1, retentionDays: 7, statusHistory: [], auditEvents: [], alerts: [] };
+      const empty = { schemaVersion: 1, source: 'unavailable', truncated: false, statusHistory: [], auditEvents: [], alerts: [] };
+      try {
+        const data = await this.request('/api/actions');
+        if (data?.schema_version !== 1 || data.source !== 'server_audit' || !Array.isArray(data.events) || data.events.length > 200 || typeof data.truncated !== 'boolean') throw new Error('malformed_audit');
+        const auditEvents = data.events.map((event, index) => {
+          if (!event || !['INTENT', 'RESULT'].includes(event.phase) ||
+              !['checked_at', 'correlation_id', 'actor', 'operation', 'client_id'].every(key => typeof event[key] === 'string') ||
+              (event.phase === 'RESULT' && typeof event.result !== 'string')) throw new Error('malformed_audit');
+          return { id: `server-${index}-${event.correlation_id}`, timestamp: event.checked_at,
+            actor: event.actor, action: event.operation, target: event.client_id || 'Server settings',
+            correlationId: event.correlation_id, result: event.phase === 'INTENT' ? 'OPEN' : event.result === 'OK' ? 'OK' : 'ERROR',
+            reasonRu: event.phase === 'INTENT' ? 'Запрос записан сервером. Это не подтверждение выполнения.' : event.result === 'OK' ? 'Сервер подтвердил выполнение.' : `Ошибка: ${event.result}`,
+            reasonEn: event.phase === 'INTENT' ? 'Request recorded by server; completion is not confirmed.' : event.result === 'OK' ? 'Server confirmed completion.' : `Error: ${event.result}` };
+        }).reverse();
+        return { ...empty, source: 'server_audit', truncated: data.truncated, auditEvents };
+      } catch (_) { return empty; }
     }
 
     async mutate(operation, id) {
@@ -860,6 +936,12 @@
       footerMode: 'REAL CANARY · AWG READ-BACK'
     }
   };
+  if (realCanary) {
+    translations.ru.configDownloadReady = 'Конфигурация готова к скачиванию';
+    translations.ru.configCopySuccess = 'Конфигурация скопирована';
+    translations.en.configDownloadReady = 'Configuration ready to download';
+    translations.en.configCopySuccess = 'Configuration copied';
+  }
 
   function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
@@ -926,6 +1008,7 @@
   }
 
   function appendAuditEvent(event) {
+    if (realCanary) return;
     state.auditEvents = [event, ...state.auditEvents].slice(0, 120);
   }
 
@@ -1116,6 +1199,8 @@
     }
     return {
       schemaVersion: value.schemaVersion,
+      source: value.source === 'server_audit' ? 'server_audit' : 'unavailable',
+      truncated: value.truncated === true,
       retentionDays: Number.isFinite(Number(value.retentionDays)) ? Math.max(1, Math.min(30, Number(value.retentionDays))) : 7,
       statusHistory: value.statusHistory.slice(0, 60).map((item) => ({
         id: typeof item.id === 'string' ? item.id : `snapshot-${Math.random()}`,
@@ -1129,7 +1214,7 @@
         reasonRu: typeof item.reasonRu === 'string' ? item.reasonRu : '',
         reasonEn: typeof item.reasonEn === 'string' ? item.reasonEn : ''
       })),
-      auditEvents: value.auditEvents.slice(0, 120).map((item) => ({
+      auditEvents: value.auditEvents.slice(0, 200).map((item) => ({
         id: typeof item.id === 'string' ? item.id : `event-${Math.random()}`,
         timestamp: typeof item.timestamp === 'string' ? item.timestamp : null,
         actor: typeof item.actor === 'string' ? item.actor : 'SYSTEM',
@@ -1236,7 +1321,7 @@
     if (!state.activity.length) {
       $('activity-list').innerHTML = `<div class="inline-empty">${escapeHtml(t('activityEmpty'))}</div>`;
     } else {
-      $('activity-list').innerHTML = state.activity.map((event) => `<div class="activity-row"><span class="activity-dot" aria-hidden="true"></span><div><strong>${escapeHtml(event.action)}</strong><span>${escapeHtml(event.target)} · ${escapeHtml(event.actor)}</span></div><time>${escapeHtml(formatDateTime(event.timestamp))}</time></div>`).join('');
+      $('activity-list').innerHTML = state.activity.map((event) => `<div class="activity-row"><span class="activity-dot" aria-hidden="true"></span><div><strong>${escapeHtml(auditActionLabel(event.action))}</strong><span>${escapeHtml(event.target)} · ${escapeHtml(event.actor)}</span></div><time>${escapeHtml(formatDateTime(event.timestamp))}</time></div>`).join('');
     }
   }
 
@@ -1363,12 +1448,20 @@
     });
   }
 
+  function auditActionLabel(action) {
+    if (!realCanary || state.locale !== 'ru') return action;
+    const match = /^(?:(awg3|awg2|wg)_)?(.+)$/.exec(action);
+    const labels = { create: 'Создание клиента', enable: 'Включение клиента', disable: 'Отключение клиента', delete: 'Удаление клиента', template: 'Изменение шаблона', config_update: 'Изменение конфигурации', endpoint_update: 'Изменение адреса подключения', port_update: 'Изменение порта', network_update: 'Изменение подсети' };
+    return labels[match[2]] ? `${labels[match[2]]} · ${(match[1] || 'awg3').toUpperCase()}` : action;
+  }
+
   function renderJournal() {
     const alerts = getAlerts();
     const visibleEvents = getVisibleAuditEvents();
     $('journal-search').value = state.journalSearch;
     $('journal-result-filter').value = state.journalResultFilter;
-    $('journal-retention').textContent = `${formatCount(state.retentionDays)} ${t('days')}`;
+    $('journal-retention').textContent = realCanary ? (state.journalSource === 'server_audit' ? (state.locale === 'ru' ? 'Серверный журнал' : 'Server audit log') : (state.locale === 'ru' ? 'Журнал недоступен' : 'Audit unavailable')) : `${formatCount(state.retentionDays)} ${t('days')}`;
+    if (realCanary) document.querySelector('[data-i18n="retentionDescription"]').textContent = state.locale === 'ru' ? (state.journalSource === 'server_audit' ? `Последние события сервера, до 200 записей.${state.journalTruncated ? ' Более ранние записи не показаны.' : ''} История состояния ниже — только текущая вкладка.` : 'Не удалось прочитать журнал сервера. Список клиентов доступен; повторите обновление.') : (state.journalSource === 'server_audit' ? 'Latest server events, up to 200 records. Status history below is from this tab only.' : 'Server audit unavailable. Clients remain available; refresh to retry.');
     $('alert-count').textContent = formatCount(alerts.length);
     $('history-count').textContent = formatCount(state.statusHistory.length);
     $('event-count').textContent = `${formatCount(visibleEvents.length)} / ${formatCount(state.auditEvents.length)}`;
@@ -1388,8 +1481,8 @@
     </div>`).join('') : `<div class="inline-empty">${escapeHtml(t('noHistory'))}</div>`;
 
     $('journal-events').innerHTML = visibleEvents.length ? visibleEvents.map((event) => `<article class="audit-row">
-      <div class="audit-copy"><strong>${escapeHtml(event.action)}</strong><span>${escapeHtml(event.target)} · ${escapeHtml(event.actor)}</span><small>${escapeHtml(localizedField(event, 'reason'))}</small></div>
-      <div class="audit-meta"><span class="event-result event-result-${escapeHtml(event.result.toLowerCase())}">${escapeHtml(event.result)}</span><time>${escapeHtml(formatDateTime(event.timestamp))}</time><code>${escapeHtml(event.correlationId)}</code></div>
+      <div class="audit-copy"><strong>${escapeHtml(auditActionLabel(event.action))}</strong><span>${escapeHtml(event.target)} · ${escapeHtml(event.actor)}</span><small>${escapeHtml(localizedField(event, 'reason'))}</small></div>
+      <div class="audit-meta"><span class="event-result event-result-${escapeHtml(event.result.toLowerCase())}">${escapeHtml(realCanary && state.locale === 'ru' ? ({ OK: 'Выполнено', OPEN: 'Запрос', ERROR: 'Ошибка' }[event.result] || event.result) : event.result)}</span><time>${escapeHtml(formatDateTime(event.timestamp))}</time><code>${escapeHtml(event.correlationId)}</code></div>
     </article>`).join('') : `<div class="inline-empty">${escapeHtml(state.journalSearch || state.journalResultFilter !== 'ALL' ? t('filterEmpty') : t('noEvents'))}</div>`;
   }
 
@@ -1397,8 +1490,10 @@
     return {
       schema_version: state.observabilitySchemaVersion,
       generated_at: new Date().toISOString(),
-      runtime: 'mock_observability',
-      retention_days: state.retentionDays,
+      runtime: realCanary ? (state.journalSource || 'unavailable') : 'mock_observability',
+      status_history_source: realCanary ? 'browser_session' : 'mock',
+      truncated: realCanary ? state.journalTruncated === true : false,
+      retention_days: realCanary ? null : state.retentionDays,
       alerts: getAlerts().map((alert) => ({
         id: alert.id,
         severity: alert.severity,
@@ -1554,6 +1649,7 @@
     const realResult = realCanary && wizard.step === 'result' && Boolean(wizard.result);
     $('create-real-result').hidden = !realResult;
     $('create-config-text').value = realResult ? wizard.result.configText : '';
+    renderConfigurationSafety('create-config-safety', realResult ? wizard.result.configText : '');
     const canvas = $('create-qr');
     if (realResult && canvas.dataset.rendered !== 'true') {
       if (canvas.dataset.pending !== 'true') {
@@ -1698,7 +1794,7 @@
       const ru = state.locale === 'ru';
       $('config-preview-title').textContent = ru ? 'Конфигурация клиента' : 'Client configuration';
       document.querySelector('#config-preview-modal .eyebrow').textContent = ru ? 'КЛИЕНТ / КОНФИГУРАЦИЯ' : 'CLIENT / CONFIGURATION';
-      $('config-preview-copy-text').textContent = ru ? 'Приватная конфигурация. Скачивайте и показывайте QR только на доверенном устройстве.' : 'Private configuration. Download and display the QR only on a trusted device.';
+      $('config-preview-copy-text').textContent = ru ? 'Содержит ключ доступа. Окно очищается через 2 минуты или при скрытии вкладки. Скачанные файлы и буфер обмена автоматически не очищаются.' : 'Contains an access key. Cleared after 2 minutes or when the tab is hidden. Downloaded files and clipboard contents are not automatically cleared.';
       $('config-preview-download').textContent = ru ? 'Скачать .conf' : 'Download .conf';
       $('config-preview-tab-overview').textContent = ru ? 'Файл' : 'File';
       $('config-preview-tab-edit').textContent = ru ? 'Параметры' : 'Settings';
@@ -1709,6 +1805,7 @@
     modal.hidden = !config.open;
     modal.setAttribute('aria-hidden', String(!config.open));
     const result = config.result;
+    renderConfigurationSafety('config-safety', result?.configText || '');
     const ru = state.locale === 'ru';
     $('config-file-title').textContent = result ? (ru ? 'Файл конфигурации готов' : 'Configuration file is ready') :
       config.loading ? (ru ? 'Готовим конфигурацию…' : 'Preparing configuration…') : (ru ? 'Конфигурация недоступна' : 'Configuration unavailable');
@@ -1963,6 +2060,7 @@
           expiration: currentClient.expiration || '', status: currentClient.status,
           configText: result.configText, qrDataUri: result.qrDataUri, revision: preview.revision };
         setConfigEditForm(result.configText);
+        armSecretExpiry();
       } else {
         state.configPreview.result = normalizeConfigurationPreview(preview, currentClient);
         recordAuditAction('CONFIG_PREVIEWED', client.name, 'DRY_RUN', 'Configuration preview содержит только mock data.', 'Configuration preview contains mock data only.');
@@ -1982,6 +2080,7 @@
 
   function closeConfigurationPreview({ restoreFocus = true } = {}) {
     const id = state.configPreview.clientId;
+    window.clearTimeout(secretTimer);
     activeConfigPreviewRequest = null;
     state.configPreview = { open: false, clientId: null, tab: 'overview', loading: false, saving: false, error: '', result: null };
     render();
@@ -2019,6 +2118,7 @@
       $('config-edit-status').textContent = state.locale === 'ru' ? 'Сохранено' : 'Saved';
       showToast(state.locale === 'ru' ? 'Конфигурация клиента сохранена' : 'Client configuration saved', 'success');
     } catch (_error) {
+      if (!config.open || state.configPreview !== config) return;
       $('config-edit-status').textContent = state.locale === 'ru' ? 'Не удалось сохранить. Закройте окно и откройте конфиг заново.' : 'Save failed. Reopen the configuration and try again.';
     } finally {
       config.saving = false;
@@ -2059,7 +2159,7 @@
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = realCanary ? `awg-cita-${state.selectedProfile}-${result.clientId}.conf` : `awg-cita-mock-${result.clientId}.conf`;
+    link.download = realCanary ? clientConfigurationFilename(result.clientName) : `awg-cita-mock-${result.clientId}.conf`;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -2089,6 +2189,7 @@
 
   function closeCreatePreview() {
     if (state.createPreview.submitting) return;
+    window.clearTimeout(secretTimer);
     resetCreatePreview();
     render();
     $('add-client-button').focus();
@@ -2134,6 +2235,10 @@
       return;
     }
     state.createPreview.submitting = true;
+    const generation = secretGeneration;
+    const wizard = state.createPreview;
+    const profile = state.selectedProfile;
+    const isCurrentCreation = () => generation === secretGeneration && state.createPreview === wizard && state.selectedProfile === profile;
     state.createPreview.error = '';
     render();
     try {
@@ -2146,13 +2251,16 @@
           idempotencyKey: attempt.nonce,
           acknowledged: true
         }), attempt.name, attempt.tags);
+        if (!isCurrentCreation() || document.hidden || sessionExpired) return;
         state.createPreview.result = result;
         state.createPreview.step = 'result';
+        armSecretExpiry();
         // Read back only public records; never feed private configuration to activity/audit hooks.
         try {
-          state.clients = normalizeClients(await adapter.listClients());
-          state.lastRefresh = new Date().toISOString();
+          const clients = normalizeClients(await adapter.listClients());
+          if (isCurrentCreation()) { state.clients = clients; state.lastRefresh = new Date().toISOString(); }
         } catch (_readError) {
+          if (!isCurrentCreation()) return;
           showToast(state.locale === 'ru' ? 'Peer создан; обновление списка не удалось. Проверьте список вручную.' : 'Peer created; list refresh failed. Check the list manually.', 'error');
         }
       } else {
@@ -2179,13 +2287,16 @@
       showToast(t('previewResultHeading'), 'success');
       }
     } catch (_error) {
+      if (!isCurrentCreation()) return;
       state.createPreview.error = realCanary ? 'realCreateError' : 'previewAdapterError';
       if (realCanary) {
-        try { state.clients = normalizeClients(await adapter.listClients()); } catch (_readError) { /* Create stays available. */ }
+        try {
+          const clients = normalizeClients(await adapter.listClients());
+          if (isCurrentCreation()) state.clients = clients;
+        } catch (_readError) { /* Create stays available. */ }
       }
     } finally {
-      state.createPreview.submitting = false;
-      render();
+      if (state.createPreview === wizard) { state.createPreview.submitting = false; render(); }
     }
   }
 
@@ -2200,13 +2311,21 @@
     }
   }
 
+  function clientConfigurationFilename(name) {
+    let stem = String(name || '').replace(/[\u0000-\u001f\u007f<>:"/\\|?*]/g, '-').trim().replace(/[. ]+$/g, '');
+    if (/\.conf$/i.test(stem)) stem = stem.slice(0, -5).replace(/[. ]+$/g, '');
+    if (!stem) stem = 'client';
+    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(stem)) stem = `client-${stem}`;
+    return `${stem.slice(0, 120).replace(/[. ]+$/g, '')}.conf`;
+  }
+
   function downloadCreatedConfiguration() {
     const result = state.createPreview.result;
     if (!realCanary || !result || state.createPreview.step !== 'result') return;
     const url = URL.createObjectURL(new Blob([result.configText], { type: 'text/plain;charset=utf-8' }));
     const link = document.createElement('a');
     link.href = url;
-    link.download = `awg-cita-${state.selectedProfile}-${result.client.id}.conf`;
+    link.download = clientConfigurationFilename(result.client.name);
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -2310,12 +2429,13 @@
     }
   }
 
-  async function loadServerSettings() {
+  async function loadServerSettings(onlyProfile = null) {
     const ru = state.locale === 'ru';
     $('server-settings-title').textContent = ru ? 'Интерфейсы сервера' : 'Server interfaces';
     $('server-settings-note').textContent = ru ? 'Endpoint меняется без перезапуска. Порт, адрес и обфускация перезапускают выбранный интерфейс; после изменения скачайте конфиги заново. AWG 3.1 пока доступен только для endpoint и порта.' : 'Endpoint changes without a restart. Port, address and obfuscation restart the selected interface; download client configs again afterward. AWG 3.1 currently supports endpoint and port changes only.';
     $('client-defaults-title').textContent = ru ? 'Шаблоны конфигов' : 'Client config templates';
     for (const profile of ['awg3', 'awg2', 'wg']) {
+      if (onlyProfile && profile !== onlyProfile) continue;
       const content = document.querySelector(`[data-server-profile="${profile}"] .server-settings-content`);
       const form = document.querySelector(`[data-endpoint-profile="${profile}"]`);
       const portForm = document.querySelector(`[data-port-profile="${profile}"]`);
@@ -2341,7 +2461,10 @@
           addressForm.dataset.revision = value.revision;
           addressForm.dataset.currentAddress = value.address;
           addressForm.elements.namedItem('address').value = value.address;
-          addressForm.querySelector('button').disabled = false;
+          const dualStack = value.address.includes(',');
+          addressForm.querySelector('button').disabled = dualStack;
+          addressForm.elements.namedItem('address').disabled = dualStack;
+          document.querySelector(`[data-address-status="${profile}"]`).textContent = dualStack ? (ru ? 'Перенос подсети IPv4 + IPv6 пока не поддерживается.' : 'IPv4 + IPv6 subnet migration is not supported yet.') : '';
         }
         if (obfuscationForm) {
           obfuscationForm.hidden = !value.obfuscation;
@@ -2381,10 +2504,10 @@
       const value = await adapter.updateServerEndpoint(profile, form.dataset.revision, endpoint);
       if (value?.schema_version !== 1 || value.profile !== profile || value.endpoint !== endpoint) throw new Error('invalid_server_settings');
       status.textContent = state.locale === 'ru' ? 'Сохранено. Скачайте конфиги клиентов заново.' : 'Saved. Download client configs again.';
-      await loadServerSettings();
+      await loadServerSettings(profile);
     } catch (_error) {
       status.textContent = state.locale === 'ru' ? 'Не удалось применить. Состояние обновлено.' : 'Apply failed. Status refreshed.';
-      await loadServerSettings();
+      await loadServerSettings(profile);
     } finally { button.disabled = false; }
   }
 
@@ -2402,10 +2525,10 @@
       const value = await adapter.updateServerPort(profile, form.dataset.revision, listenPort);
       if (value?.schema_version !== 1 || value.profile !== profile || value.listenPort !== listenPort) throw new Error('invalid_server_settings');
       status.textContent = state.locale === 'ru' ? 'Порт перенесён. Скачайте конфиги клиентов заново.' : 'Port moved. Download client configs again.';
-      await loadServerSettings();
+      await loadServerSettings(profile);
     } catch (_error) {
-      status.textContent = state.locale === 'ru' ? 'Перенос не выполнен. Проверьте состояние.' : 'Move failed. Check server status.';
-      await loadServerSettings();
+      status.textContent = state.locale === 'ru' ? 'Результат переноса не подтверждён. Проверьте состояние перед повторной попыткой.' : 'Move outcome is uncertain. Check server status before retrying.';
+      await loadServerSettings(profile);
     } finally { button.disabled = false; }
   }
 
@@ -2424,10 +2547,10 @@
       const value = await adapter.updateServerNetwork(profile, form.dataset.revision, change);
       if (value?.schema_version !== 1 || value.profile !== profile || (kind === 'address' ? value.address !== change.address :
           JSON.stringify(value.obfuscation) !== JSON.stringify(change.obfuscation))) throw new Error('invalid_server_settings');
-      await loadServerSettings();
+      await loadServerSettings(profile);
       status.textContent = state.locale === 'ru' ? 'Применено. Скачайте конфиги заново.' : 'Applied. Download client configs again.';
     } catch (_error) {
-      await loadServerSettings();
+      await loadServerSettings(profile);
       status.textContent = state.locale === 'ru' ? 'Не удалось применить. Проверьте состояние интерфейса.' : 'Apply failed. Check interface status.';
     } finally { button.disabled = false; }
   }
@@ -2486,6 +2609,8 @@
       const observability = normalizeObservability(observabilityResult);
       state.observabilitySchemaVersion = observability.schemaVersion;
       state.retentionDays = observability.retentionDays;
+      state.journalSource = observability.source;
+      state.journalTruncated = observability.truncated;
       state.statusHistory = observability.statusHistory;
       state.auditEvents = observability.auditEvents;
       state.alerts = observability.alerts;
@@ -2514,14 +2639,21 @@
     state.error = '';
     render();
     try {
-      const refreshed = normalizeClients(await adapter.refreshStatus());
+      const [clientResult, auditResult] = await Promise.all([adapter.refreshStatus(), realCanary ? adapter.listObservability() : null]);
+      const refreshed = normalizeClients(clientResult);
       if (requestedProfile !== state.selectedProfile) return;
       state.clients = refreshed;
+      if (realCanary) {
+        const audit = normalizeObservability(auditResult);
+        state.auditEvents = audit.auditEvents;
+        state.journalSource = audit.source;
+        state.journalTruncated = audit.truncated;
+      }
       const now = new Date().toISOString();
       const onlineCount = state.clients.filter((client) => client.status === 'ONLINE').length;
       const attentionCount = state.clients.filter((client) => ['STALE', 'NEVER', 'DISABLED'].includes(client.status) || client.warning).length;
       state.statusHistory = [{ id: `snapshot-runtime-${Date.now()}`, checkedAt: now, state: 'OK', peerCount: state.clients.length, onlineCount, attentionCount, rxBytes: state.clients.reduce((sum, client) => sum + (Number(client.rxBytes) || 0), 0), txBytes: state.clients.reduce((sum, client) => sum + (Number(client.txBytes) || 0), 0), reasonRu: realCanary ? 'Обновление из AWG read-back.' : 'Обновление выполнено из mock adapter.', reasonEn: realCanary ? 'Refreshed from AWG read-back.' : 'Refresh completed by the mock adapter.' }, ...state.statusHistory].slice(0, 60);
-      state.auditEvents = [{ id: `event-runtime-${Date.now()}`, timestamp: now, actor: 'OPERATOR', action: 'STATUS_REFRESHED', target: 'AWG node', result: 'OK', correlationId: `corr-runtime-${Date.now()}`, reasonRu: 'Оператор запросил обновление состояния.', reasonEn: 'Operator requested a status refresh.' }, ...state.auditEvents].slice(0, 120);
+      if (!realCanary) state.auditEvents = [{ id: `event-runtime-${Date.now()}`, timestamp: now, actor: 'OPERATOR', action: 'STATUS_REFRESHED', target: 'AWG node', result: 'OK', correlationId: `corr-runtime-${Date.now()}`, reasonRu: 'Оператор запросил обновление состояния.', reasonEn: 'Operator requested a status refresh.' }, ...state.auditEvents].slice(0, 120);
       state.refreshFailures = 0;
       state.lastRefresh = new Date().toISOString();
       addActivity(t('refreshed'), `${state.clients.length} ${t('records')}`);
@@ -2530,7 +2662,7 @@
       if (requestedProfile !== state.selectedProfile) return;
       state.refreshFailures += 1;
       const now = new Date().toISOString();
-      state.auditEvents = [{ id: `event-runtime-error-${Date.now()}`, timestamp: now, actor: 'SYSTEM', action: 'STATUS_REFRESH_FAILED', target: 'AWG node', result: 'ERROR', correlationId: `corr-runtime-error-${Date.now()}`, reasonRu: realCanary ? 'AWG read-back вернул ошибку.' : 'Mock adapter вернул ошибку обновления.', reasonEn: realCanary ? 'AWG read-back failed.' : 'The mock adapter returned a refresh error.' }, ...state.auditEvents].slice(0, 120);
+      if (!realCanary) state.auditEvents = [{ id: `event-runtime-error-${Date.now()}`, timestamp: now, actor: 'SYSTEM', action: 'STATUS_REFRESH_FAILED', target: 'AWG node', result: 'ERROR', correlationId: `corr-runtime-error-${Date.now()}`, reasonRu: realCanary ? 'AWG read-back вернул ошибку.' : 'Mock adapter вернул ошибку обновления.', reasonEn: realCanary ? 'AWG read-back failed.' : 'The mock adapter returned a refresh error.' }, ...state.auditEvents].slice(0, 120);
       state.error = t('refreshError');
       showToast(t('refreshError'), 'error');
     } finally {
@@ -2579,6 +2711,7 @@
       return;
     }
     if (event.target.closest('#logout-button')) {
+      if (realCanary) clearPrivateViews();
       if (realCanary) fetch('/auth/logout', { method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' }, body: '{}' })
         .then((response) => { if (!response.ok) throw new Error('logout failed'); window.location.replace('/login'); })
@@ -2892,6 +3025,8 @@
   });
 
   window.addEventListener('popstate', () => navigate(viewFromLocation(), { fromHistory: true }));
+  document.addEventListener('visibilitychange', () => { if (realCanary && document.hidden) clearPrivateViews(); });
+  window.addEventListener('pagehide', () => { if (realCanary) clearPrivateViews(); });
   window.addEventListener('resize', renderDossier);
 
   if (testMode) {
@@ -2901,6 +3036,7 @@
       getVisibleClients,
       getVisibleAuditEvents,
       normalizeClients,
+      clientConfigurationFilename,
       normalizeObservability,
       normalizePreviewResult,
       safeEvidencePayload,

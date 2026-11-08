@@ -1,0 +1,3 @@
+Defaults!AWG_MANAGER_READ !setenv
+Cmnd_Alias AWG_MANAGER_READ = /usr/local/sbin/awg-manager-read ""
+awg-manager ALL=(root) NOPASSWD: AWG_MANAGER_READ

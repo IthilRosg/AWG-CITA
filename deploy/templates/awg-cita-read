@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+[ "$#" -eq 3 ] && [ "$1" = show ] && [ "$2" = awg-canary0 ] && [ "$3" = dump ] || exit 64
+exec /usr/bin/sudo -n /usr/local/sbin/awg-manager-read

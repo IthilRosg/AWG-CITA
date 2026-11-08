@@ -48,6 +48,7 @@ INDEX_HTML = """<!doctype html>
     </aside>
 
     <main id="app" class="app" aria-busy="true">
+      <div id="session-expired" class="session-notice" role="alert" hidden><span></span> <a href="/login">Войти / Sign in</a></div>
       <div class="topbar">
         <span class="eyebrow" data-i18n="perimeter">ЛОКАЛЬНЫЙ КОНТУР</span>
         <div class="topbar-actions"><span id="connection-state" class="connection-state" data-state="loading">● LOADING</span><button id="logout-button" class="logout-button" type="button" hidden>Выйти</button></div>
@@ -116,6 +117,7 @@ INDEX_HTML = """<!doctype html>
             </dl>
             <div id="preview-result-boundary" class="preview-boundary" data-i18n="previewNoPeerCreated">NO PEER CREATED · KEYS / CONFIG / QR NOT GENERATED</div>
             <div id="create-real-result" hidden>
+              <details id="create-config-safety" class="config-safety" hidden></details>
               <div class="create-result-actions">
                 <button id="create-config-download" class="button button-primary" type="button">Download .conf</button>
                 <button id="create-config-copy" class="button" type="button">Copy configuration</button>
@@ -224,6 +226,7 @@ INDEX_HTML = """<!doctype html>
               <button id="config-preview-tab-edit" class="config-tab" type="button" role="tab" aria-selected="false" aria-controls="config-preview-edit-panel" data-config-tab="edit" hidden>Параметры</button>
             </div>
             <section id="config-preview-overview-panel" class="config-tab-panel config-overview-panel" role="tabpanel" aria-labelledby="config-preview-tab-overview">
+              <details id="config-safety" class="config-safety" hidden></details>
               <div class="config-file-card"><span class="config-file-icon" aria-hidden="true">↓</span><div><strong id="config-file-title">Файл конфигурации готов</strong><p id="config-file-copy">Скачайте .conf или скопируйте содержимое. QR и редактор доступны в соседних вкладках.</p></div></div>
             </section>
             <section id="config-preview-qr-panel" class="config-tab-panel" role="tabpanel" aria-labelledby="config-preview-tab-qr" hidden>

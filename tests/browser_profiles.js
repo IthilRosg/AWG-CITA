@@ -111,10 +111,12 @@ async function main() {
     await page.locator('#settings-tab-server').click();
     await page.screenshot({ path: '.ops-tmp/awg-cita-browser-artifacts/multi-profile-server-settings.png' });
     await page.waitForFunction(() => document.querySelector('[data-server-profile="awg2"] .server-settings-content')?.textContent.includes('awg-cita2'));
+    await page.locator('[data-endpoint-profile="awg2"] [name="endpoint"]').fill('draft.example.test');
     const endpointForm = page.locator('[data-endpoint-profile="wg"]');
     await endpointForm.locator('[name="endpoint"]').fill('vpn.example.org');
     await endpointForm.locator('button').click();
     await page.waitForFunction(() => document.querySelector('[data-server-profile="wg"] .server-settings-content')?.textContent.includes('vpn.example.org'));
+    if (await page.locator('[data-endpoint-profile="awg2"] [name="endpoint"]').inputValue() !== 'draft.example.test') throw new Error('saving WG erased AWG2 draft');
     const portForm = page.locator('[data-port-profile="awg2"]');
     await portForm.locator('[name="listenPort"]').fill('48193');
     await portForm.locator('button').click();
@@ -142,6 +144,11 @@ async function main() {
     await page.screenshot({ path: '.ops-tmp/awg-cita-browser-artifacts/multi-profile-settings-mobile.png' });
     await page.locator('#settings-tab-server').click();
     if (!(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))) throw new Error('mobile server settings overflow');
+    addresses.wg = '127.43.0.1/24, ::1/128';
+    await page.reload();
+    await page.locator('#settings-tab-server').click();
+    await page.waitForFunction(() => document.querySelector('[data-address-profile="wg"] [name="address"]')?.disabled === true);
+    if (!(await page.locator('[data-address-status="wg"]').textContent()).includes('IPv4 + IPv6')) throw new Error('missing dual-stack migration explanation');
     console.log('PROFILE_SWITCH=PASS TEMPLATE_SETTINGS=PASS');
   } finally {
     if (browser) await browser.close();

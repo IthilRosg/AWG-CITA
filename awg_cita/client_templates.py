@@ -19,19 +19,21 @@ def validate(value: object) -> dict[str, object]:
         raise ValueError('invalid client template')
     dns, routes = value['dns_server'], value['allowed_ips']
     mtu, keepalive = value['mtu'], value['keepalive']
-    if not isinstance(dns, str) or not isinstance(routes, str) or not 1 <= len(routes) <= 128:
+    if (not isinstance(dns, str) or not 1 <= len(dns) <= 128 or
+            not isinstance(routes, str) or not 1 <= len(routes) <= 128):
         raise ValueError('invalid client template')
     try:
-        ipaddress.ip_address(dns)
+        servers = [ipaddress.ip_address(part.strip()) for part in dns.split(',')]
         networks = [ipaddress.ip_network(part.strip(), strict=True) for part in routes.split(',')]
     except ValueError as error:
         raise ValueError('invalid client template') from error
-    if (not 1 <= len(networks) <= 8 or any(network.version != 4 for network in networks) or
+    if (not 1 <= len(networks) <= 8 or not 1 <= len(servers) <= 4 or
+        len(set(servers)) != len(servers) or
         len(set(networks)) != len(networks) or
         type(mtu) is not int or not 1280 <= mtu <= 1500 or
         type(keepalive) is not int or not 0 <= keepalive <= 120):
         raise ValueError('invalid client template')
-    return {'dns_server': str(ipaddress.ip_address(dns)),
+    return {'dns_server': ', '.join(str(server) for server in servers),
             'allowed_ips': ', '.join(str(network) for network in networks),
             'mtu': mtu, 'keepalive': keepalive}
 

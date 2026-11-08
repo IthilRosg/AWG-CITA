@@ -55,15 +55,22 @@ class OperatorAuth:
 
     def authenticate(self, username: object, password: object) -> str | None:
         if (not isinstance(username, str) or not isinstance(password, str) or
-                len(username) > 64 or not 1 <= len(password) <= 256):
+                not username.isascii() or len(username) > 64 or not 1 <= len(password) <= 256):
             return None
         try:
             candidate = password.encode('utf-8')
         except UnicodeEncodeError:
             return None
-        if len(candidate) > 512:
+        # bcrypt accepts at most 72 bytes. Never truncate: a longer password
+        # must not authenticate as its prefix, including with older backends.
+        if len(candidate) > 72:
             return None
-        valid_password = self.verify(candidate, self.password_hash)
+        try:
+            valid_password = self.verify(candidate, self.password_hash)
+        except Exception:
+            # A verifier failure is an authentication failure, not a session
+            # or an HTTP traceback that could disclose implementation details.
+            return None
         if not valid_password or not hmac.compare_digest(username, self.operator_id):
             return None
         token = secrets.token_urlsafe(32)

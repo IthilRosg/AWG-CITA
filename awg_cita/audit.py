@@ -9,6 +9,7 @@ import stat
 import threading
 import time
 import datetime as dt
+from collections import deque
 from pathlib import Path
 from typing import Callable
 
@@ -31,6 +32,7 @@ _ACTOR_RE = re.compile(r"[A-Za-z0-9_.@-]{1,64}\Z")
 _PEER_RE = re.compile(r"peer-[0-9a-f]{16}\Z")
 _HEX32_RE = re.compile(r"[0-9a-f]{32}\Z")
 _HEX64_RE = re.compile(r"[0-9a-f]{64}\Z")
+_MAX_ACTION_HISTORY_RECORDS = 200
 
 
 def _utc_now() -> str:
@@ -104,6 +106,51 @@ def project_action_event(*, checked_at: str, phase: str, correlation_id: str,
             "phase": phase, "correlation_id": correlation_id, "actor": actor,
             "operation": operation, "client_id": client_id,
             "nonce_digest": nonce_digest, **({"result": result} if result is not None else {})}
+
+
+def _parse_action_record(line: bytes) -> dict[str, object]:
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('duplicate action audit field')
+            result[key] = value
+        return result
+
+    try:
+        if not 1 <= len(line) + 1 <= _MAX_RECORD_BYTES:
+            raise ValueError('invalid action audit record length')
+        event = json.loads(line, object_pairs_hook=unique)
+        if not isinstance(event, dict) or type(event.get('schema_version')) is not int:
+            raise ValueError('invalid action audit record')
+        projected = project_action_event(
+            checked_at=event['checked_at'], phase=event['phase'],
+            correlation_id=event['correlation_id'], actor=event['actor'],
+            operation=event['operation'], client_id=event['client_id'],
+            nonce_digest=event['nonce_digest'], result=event.get('result'))
+        if event != projected:
+            raise ValueError('invalid action audit record')
+        return projected
+    except (ValueError, TypeError, KeyError, UnicodeError) as error:
+        raise ValueError('invalid action audit record') from error
+
+
+def project_action_history(raw: bytes) -> dict[str, object]:
+    """Validate bounded JSONL and expose only the last 200 safe action records."""
+    if not isinstance(raw, bytes) or len(raw) > _MAX_AUDIT_BYTES or (raw and not raw.endswith(b'\n')):
+        raise ValueError('invalid action audit history')
+    events: deque[dict[str, object]] = deque(maxlen=_MAX_ACTION_HISTORY_RECORDS)
+    count = 0
+    for line in raw.splitlines():
+        event = _parse_action_record(line)
+        visible = {key: event[key] for key in ('checked_at', 'phase', 'correlation_id',
+                                               'actor', 'operation', 'client_id')}
+        if event['phase'] == 'RESULT':
+            visible['result'] = event['result']
+        events.append(visible)
+        count += 1
+    return {'schema_version': 1, 'source': 'server_audit', 'events': list(events),
+            'truncated': count > _MAX_ACTION_HISTORY_RECORDS}
 
 
 class AuditLog:
@@ -257,14 +304,7 @@ class ActionAuditLog(AuditLog):
             pending: dict[str, tuple[str, str, str]] = {}
             completed: set[str] = set()
             for line in data.splitlines():
-                event = json.loads(line)
-                projected = project_action_event(
-                    checked_at=event["checked_at"], phase=event["phase"],
-                    correlation_id=event["correlation_id"], actor=event["actor"],
-                    operation=event["operation"], client_id=event["client_id"],
-                    nonce_digest=event["nonce_digest"], result=event.get("result"))
-                if event != projected:
-                    raise ValueError("invalid action audit record")
+                event = _parse_action_record(line)
                 correlation_id = event["correlation_id"]
                 if event["phase"] == "INTENT":
                     if correlation_id in pending or correlation_id in completed:
@@ -284,6 +324,34 @@ class ActionAuditLog(AuditLog):
             if isinstance(error, (OSError, ValueError)):
                 raise
             raise ValueError("invalid action audit file") from error
+
+    def recent_actions(self) -> dict[str, object]:
+        """Read the already configured file without following replacement links."""
+        with self._lock:
+            if self._failed or self._descriptor is None or self._parent_descriptor is None:
+                raise RuntimeError('action audit unavailable')
+            self._validate_current_descriptor()
+            if not 0 <= self._expected_size <= _MAX_AUDIT_BYTES:
+                raise ValueError('invalid action audit size')
+            reader = os.open(self._leaf_name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                             dir_fd=self._parent_descriptor)
+            try:
+                metadata = self._validate_descriptor(reader)
+                if (metadata.st_dev, metadata.st_ino, metadata.st_size) != (
+                        self._device, self._inode, self._expected_size):
+                    raise ValueError('action audit file changed during read')
+                raw = os.read(reader, _MAX_AUDIT_BYTES + 1)
+                if len(raw) != self._expected_size:
+                    raise ValueError('action audit file changed during read')
+                # Revalidate both the open inode and directory entry after reading.
+                after = self._validate_descriptor(reader)
+                if (after.st_dev, after.st_ino, after.st_size) != (
+                        self._device, self._inode, self._expected_size):
+                    raise ValueError('action audit file changed during read')
+                self._validate_current_descriptor()
+                return project_action_history(raw)
+            finally:
+                os.close(reader)
 
     def record_action(self, *, phase: str, correlation_id: str, actor: str,
                       operation: str, client_id: str, nonce_digest: str,

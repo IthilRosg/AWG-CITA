@@ -1,0 +1,31 @@
+[Unit]
+Description=AWG CITA operator relay
+After=network-online.target @BACKEND_UNIT@.service
+Requires=@BACKEND_UNIT@.service
+
+[Service]
+Type=simple
+User=awg-manager
+Group=awg-cita-relay
+Environment=PYTHONPATH=/opt/awg-cita/current/site
+Environment=AWG_CITA_OPERATOR_HOST=@HOST@
+Environment=AWG_CITA_OPERATOR_ORIGIN=@ORIGIN@
+Environment=AWG_CITA_OPERATOR_ID=@OPERATOR_ID@
+Environment=AWG_CITA_AUTH_MODE=form
+Environment=AWG_CITA_AUTH_HASH_FILE=@AUTH_FILE@
+Environment=AWG_CITA_LOGIN_ROOT=/opt/awg-cita/current/site/awg_cita/static
+ExecStart=/usr/bin/python3 /opt/awg-cita/current/rate_limit_proxy.py
+RuntimeDirectory=awg-cita-relay
+RuntimeDirectoryMode=0750
+Restart=on-failure
+RestartSec=5
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+NoNewPrivileges=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

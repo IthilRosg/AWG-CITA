@@ -69,7 +69,9 @@ class LifecycleServiceTests(unittest.TestCase):
 
     def test_list_clients_rejects_adapter_result_over_the_record_bound(self):
         template = FakeAwgLifecycleAdapter().list_clients()[0]
-        clients = [dict(template, id=f"peer-test-{index}", name=f"Test Peer {index}") for index in range(65)]
+        from awg_cita.lifecycle import MAX_CLIENT_RECORDS
+        clients = [dict(template, id=f"peer-test-{index}", name=f"Test Peer {index}")
+                   for index in range(MAX_CLIENT_RECORDS + 1)]
         service = LifecycleService(FakeAwgLifecycleAdapter(clients))
 
         with self.assertRaisesRegex(LifecycleError, "internal_error"):

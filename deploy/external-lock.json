@@ -1,0 +1,22 @@
+{
+  "application_commit": "d8d5257461cc31d9ef715396fba01fc7d11660dd",
+  "application_wheel_sha256": "9423679c5e612292e0469cca610afad2a2b082a0dbd7e00079fef1825e1113f9",
+  "application_wheel_bytes": 128244,
+  "source_date_epoch": 1793970187,
+  "build_setuptools": "84.2.1",
+  "python": "CPython 3.12 on Ubuntu 24.04 amd64",
+  "runtime_dependencies": ["segno==1.6.6", "bcrypt==4.3.0"],
+  "awg": {
+    "repository": "https://github.com/amnezia-vpn/amneziawg-tools",
+    "tag": "v3.1.20260812",
+    "commit": "ee0f0a9aa34ff0a0da4b3433b9512781cfe02843",
+    "license": "GPL-2.0",
+    "license_url": "https://github.com/amnezia-vpn/amneziawg-tools/blob/ee0f0a9aa34ff0a0da4b3433b9512781cfe02843/COPYING",
+    "artifact_url": "https://github.com/amnezia-vpn/amneziawg-tools/releases/download/v3.1.20260812/ubuntu-22.04-amneziawg-tools.zip",
+    "artifact_sha256": "919e9d0a367c7c72f9c16b7d0a9e4840b943628353b2210a33cb4b582785ba56",
+    "binary_path_in_zip": "ubuntu-22.04-amneziawg-tools/awg",
+    "binary_sha256": "23d29323258166183eeeb288c1f9f08b879f3707e54591b1bfb2402413f6d8d8",
+    "architecture": "x86_64 Linux",
+    "install_policy": "reuse compatible host binary with independently approved SHA; never replace an existing AWG or kernel module"
+  }
+}
